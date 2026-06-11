@@ -1,0 +1,10 @@
+export const metadata = { title: "Gototrip", description: "Planifiez votre voyage de A à Z." };
+import "./styles/globals.css";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="fr">
+      <body>{children}</body>
+    </html>
+  );
+}

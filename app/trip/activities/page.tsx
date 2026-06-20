@@ -20,6 +20,7 @@ import {
   Sparkles,
   Wallet,
   Info,
+  PawPrint,
 } from 'lucide-react';
 import TripMap from '../../components/TripMap';
 
@@ -75,6 +76,9 @@ type TripSelection = {
   start?: string | null;
   startDate?: string | null;
   budget?: number | null;
+  hasDog?: boolean;
+  travelWithDog?: boolean;
+  pets?: string[];
   selections?: {
     activities?: Activity[];
     restaurants?: any[];
@@ -97,6 +101,30 @@ type ActivityFilter = {
 };
 
 const ACTIVITY_FILTERS: ActivityFilter[] = [
+  {
+    id: 'dog',
+    label: 'Avec chien',
+    icon: <PawPrint className="h-4 w-4" />,
+    keywords: [
+      'dog',
+      'chien',
+      'pet',
+      'pets',
+      'animaux',
+      'park',
+      'parc',
+      'garden',
+      'beach',
+      'plage',
+      'trail',
+      'hiking',
+      'walk',
+      'promenade',
+      'viewpoint',
+      'nature',
+      'outdoor',
+    ],
+  },
   {
     id: 'family',
     label: 'En famille',
@@ -261,6 +289,24 @@ function getPositiveRawPrice(value: unknown) {
   return null;
 }
 
+function isDogTravelEnabled(trip: TripSelection | null) {
+  if (!trip) return false;
+
+  return Boolean(
+    trip.hasDog ||
+      trip.travelWithDog ||
+      (Array.isArray(trip.pets) && trip.pets.includes('dog'))
+  );
+}
+
+function criteriaHasDog(criteria: any) {
+  return Boolean(
+    criteria?.hasDog ||
+      criteria?.travelWithDog ||
+      (Array.isArray(criteria?.pets) && criteria.pets.includes('dog'))
+  );
+}
+
 function isPaidActivity(activity: Activity) {
   const haystack = getActivityHaystack(activity);
 
@@ -322,6 +368,87 @@ function isActuallyFreeActivity(activity: Activity) {
   return freeKeywords.some((keyword) => haystack.includes(normalizeText(keyword)));
 }
 
+function isDogFriendlyActivity(activity: Activity) {
+  const haystack = getActivityHaystack(activity);
+
+  const notRecommendedWithDogKeywords = [
+    'museum',
+    'musee',
+    'library',
+    'bibliotheque',
+    'movie_theater',
+    'cinema',
+    'cinéma',
+    'aquarium',
+    'zoo',
+    'amusement_park',
+    'theme_park',
+    'escape_game',
+    'bowling',
+    'spa',
+    'casino',
+    'theater',
+    'opera',
+    'concert_hall',
+    'art_gallery',
+    'restaurant',
+    'night_club',
+    'nightclub',
+    'club',
+    'fitness_center',
+    'shopping_mall',
+  ];
+
+  if (
+    notRecommendedWithDogKeywords.some((keyword) =>
+      haystack.includes(normalizeText(keyword))
+    )
+  ) {
+    return false;
+  }
+
+  const dogFriendlyKeywords = [
+    'dog',
+    'chien',
+    'pet',
+    'pets',
+    'animaux',
+    'park',
+    'parc',
+    'public_garden',
+    'garden',
+    'beach',
+    'plage',
+    'square',
+    'plaza',
+    'viewpoint',
+    'scenic_point',
+    'walking_area',
+    'promenade',
+    'hiking_area',
+    'hiking',
+    'trail',
+    'nature_reserve',
+    'nature',
+    'natural',
+    'forest',
+    'forêt',
+    'lake',
+    'lac',
+    'river',
+    'rivière',
+    'bridge',
+    'monument',
+    'historical_landmark',
+    'tourist attraction',
+    'point of interest',
+  ];
+
+  return dogFriendlyKeywords.some((keyword) =>
+    haystack.includes(normalizeText(keyword))
+  );
+}
+
 function activityMatchesFilters(activity: Activity, filters: string[]) {
   if (filters.length === 0) return true;
 
@@ -334,6 +461,10 @@ function activityMatchesFilters(activity: Activity, filters: string[]) {
   return selectedFilters.some((filter) => {
     if (filter.id === 'free') {
       return isActuallyFreeActivity(activity);
+    }
+
+    if (filter.id === 'dog') {
+      return isDogFriendlyActivity(activity);
     }
 
     return filter.keywords.some((keyword) =>
@@ -396,6 +527,10 @@ function generateActivityDescription(activity: Activity, activeFilters: string[]
     ? ` Elle est notée ${activity.rating}/5 par les visiteurs.`
     : '';
 
+  if (activeFilters.includes('dog') && isDogFriendlyActivity(activity)) {
+    return `Activité estimée compatible avec un chien : plutôt extérieure, adaptée à une balade ou à un moment en plein air. Vérifiez tout de même les règles locales, la laisse obligatoire et les éventuelles restrictions sur place.${ratingText}`;
+  }
+
   if (activity.source === 'GetYourGuide') {
     return `Activité réservable via GetYourGuide. Prix, horaires et disponibilité à confirmer sur le site partenaire.${ratingText}`;
   }
@@ -457,15 +592,19 @@ function generateActivityDescription(activity: Activity, activeFilters: string[]
 }
 
 function buildApiFilter(activeFilters: string[]) {
-  const filtersWithoutFree = activeFilters.filter((filter) => filter !== 'free');
+  const filtersWithoutSpecial = activeFilters.filter(
+    (filter) => filter !== 'free' && filter !== 'dog'
+  );
 
-  if (filtersWithoutFree.includes('nature')) return 'Nature';
-  if (filtersWithoutFree.includes('culture')) return 'Culture';
-  if (filtersWithoutFree.includes('cinema')) return 'Cinéma';
-  if (filtersWithoutFree.includes('nightlife')) return 'Boîte de nuit';
-  if (filtersWithoutFree.includes('sport')) return 'Sportif';
-  if (filtersWithoutFree.includes('family')) return 'En famille';
-  if (filtersWithoutFree.includes('kids')) return 'Enfants';
+  if (filtersWithoutSpecial.includes('nature')) return 'Nature';
+  if (filtersWithoutSpecial.includes('culture')) return 'Culture';
+  if (filtersWithoutSpecial.includes('cinema')) return 'Cinéma';
+  if (filtersWithoutSpecial.includes('nightlife')) return 'Boîte de nuit';
+  if (filtersWithoutSpecial.includes('sport')) return 'Sportif';
+  if (filtersWithoutSpecial.includes('family')) return 'En famille';
+  if (filtersWithoutSpecial.includes('kids')) return 'Enfants';
+
+  if (activeFilters.includes('dog')) return 'Nature';
 
   return '';
 }
@@ -560,6 +699,7 @@ export default function ActivitiesPage() {
     const rawFilters = localStorage.getItem('gt_activity_filters');
 
     let parsedSelection: TripSelection | null = null;
+    let parsedCriteria: any = null;
 
     if (rawSelection) {
       try {
@@ -569,48 +709,69 @@ export default function ActivitiesPage() {
       }
     }
 
+    if (rawCriteria) {
+      try {
+        parsedCriteria = JSON.parse(rawCriteria);
+      } catch {
+        parsedCriteria = null;
+      }
+    }
+
     if (!parsedSelection) {
       router.push('/destinations');
       return;
     }
 
-    const previousActivities = (parsedSelection.selections?.activities || []).map(
+    const dogEnabled =
+      isDogTravelEnabled(parsedSelection) || criteriaHasDog(parsedCriteria);
+
+    const normalizedSelection: TripSelection = {
+      ...parsedSelection,
+      hasDog: dogEnabled,
+      travelWithDog: dogEnabled,
+      pets: dogEnabled ? ['dog'] : parsedSelection.pets || [],
+    };
+
+    const previousActivities = (normalizedSelection.selections?.activities || []).map(
       (activity) => ({
         ...activity,
-        link: getActivityBookingPath(parsedSelection, activity),
+        link: getActivityBookingPath(normalizedSelection, activity),
         pricePerPerson: Number(activity.pricePerPerson || 0),
         description:
-          activity.description || generateActivityDescription(activity, []),
+          activity.description || generateActivityDescription(activity, dogEnabled ? ['dog'] : []),
       })
     );
 
-    setTrip(parsedSelection);
+    setTrip(normalizedSelection);
     setSelectedActivities(previousActivities);
 
     if (rawFilters) {
       try {
         const parsedFilters = JSON.parse(rawFilters);
+        const filters = Array.isArray(parsedFilters.filters)
+          ? parsedFilters.filters
+          : [];
 
-        if (Array.isArray(parsedFilters.filters)) {
-          setActiveFilters(parsedFilters.filters);
-        }
+        setActiveFilters(
+          dogEnabled && !filters.includes('dog') ? ['dog', ...filters] : filters
+        );
       } catch {
-        setActiveFilters([]);
+        setActiveFilters(dogEnabled ? ['dog'] : []);
       }
+    } else {
+      setActiveFilters(dogEnabled ? ['dog'] : []);
     }
 
-    if (typeof parsedSelection.budget === 'number' && parsedSelection.budget > 0) {
-      setBudget(parsedSelection.budget);
-    } else if (rawCriteria) {
-      try {
-        const parsedCriteria = JSON.parse(rawCriteria);
-        const criteriaBudget = Number(parsedCriteria.budget || 0);
+    if (
+      typeof normalizedSelection.budget === 'number' &&
+      normalizedSelection.budget > 0
+    ) {
+      setBudget(normalizedSelection.budget);
+    } else if (parsedCriteria) {
+      const criteriaBudget = Number(parsedCriteria.budget || 0);
 
-        if (Number.isFinite(criteriaBudget) && criteriaBudget > 0) {
-          setBudget(criteriaBudget);
-        }
-      } catch {
-        setBudget(null);
+      if (Number.isFinite(criteriaBudget) && criteriaBudget > 0) {
+        setBudget(criteriaBudget);
       }
     }
   }, [router]);
@@ -640,6 +801,11 @@ export default function ActivitiesPage() {
 
         if (startDate) {
           params.set('date', startDate);
+        }
+
+        if (activeFilters.includes('dog') || isDogTravelEnabled(trip)) {
+          params.set('hasDog', '1');
+          params.set('dogFriendly', '1');
         }
 
         const res = await fetch(`/api/activities?${params.toString()}`, {
@@ -689,12 +855,25 @@ export default function ActivitiesPage() {
   }, [selectedActivities]);
 
   const filteredActivities = useMemo(() => {
+    const dogMode = activeFilters.includes('dog');
+
     return activities
       .map((activity) => ({
         ...activity,
         description: generateActivityDescription(activity, activeFilters),
       }))
-      .filter((activity) => activityMatchesFilters(activity, activeFilters));
+      .filter((activity) => activityMatchesFilters(activity, activeFilters))
+      .sort((a, b) => {
+        if (!dogMode) return 0;
+
+        const aDog = isDogFriendlyActivity(a);
+        const bDog = isDogFriendlyActivity(b);
+
+        if (aDog && !bDog) return -1;
+        if (!aDog && bDog) return 1;
+
+        return Number(b.rating || 0) - Number(a.rating || 0);
+      });
   }, [activities, activeFilters]);
 
   const persons = trip?.persons || 1;
@@ -766,6 +945,9 @@ export default function ActivitiesPage() {
     const nextSelection: TripSelection = {
       ...trip,
       budget,
+      hasDog: isDogTravelEnabled(trip),
+      travelWithDog: isDogTravelEnabled(trip),
+      pets: isDogTravelEnabled(trip) ? ['dog'] : trip.pets || [],
       selections: {
         activities: selectedActivitiesWithLinks,
         restaurants: trip.selections?.restaurants || [],
@@ -810,6 +992,8 @@ export default function ActivitiesPage() {
       </div>
     );
   }
+
+  const dogMode = activeFilters.includes('dog') || isDogTravelEnabled(trip);
 
   const markers = [
     {
@@ -861,6 +1045,13 @@ export default function ActivitiesPage() {
             personne(s) • {trip.duration} jour(s)
             {budget ? <> • budget {formatEuro(budget)}</> : null}
           </p>
+
+          {dogMode && (
+            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-teal-200 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-800">
+              <PawPrint className="h-4 w-4" />
+              Voyage avec chien : activités extérieures priorisées
+            </div>
+          )}
         </div>
 
         <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
@@ -889,8 +1080,9 @@ export default function ActivitiesPage() {
           </div>
 
           <p className="mt-3 text-xs text-slate-500">
-            Le bouton “Réserver sur GetYourGuide” ouvre une recherche liée au nom
-            de l’activité, à la ville et au pays, avec votre identifiant partenaire.
+            Le filtre “Avec chien” privilégie les parcs, balades, plages,
+            points de vue, randonnées et lieux extérieurs. Les règles locales
+            restent à vérifier avant la visite.
           </p>
         </section>
 
@@ -922,6 +1114,7 @@ export default function ActivitiesPage() {
                 const total = Number(activity.pricePerPerson || 0) * persons;
                 const readableTypes = getReadableTypes(activity);
                 const isFree = isActuallyFreeActivity(activity);
+                const isDogFriendly = isDogFriendlyActivity(activity);
                 const activityGetYourGuideLink = getActivityBookingPath(
                   trip,
                   activity
@@ -956,6 +1149,13 @@ export default function ActivitiesPage() {
                           {isFree && (
                             <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
                               Gratuit estimé
+                            </span>
+                          )}
+
+                          {dogMode && isDogFriendly && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700">
+                              <PawPrint className="h-3.5 w-3.5" />
+                              Chien possible estimé
                             </span>
                           )}
                         </div>
@@ -1009,6 +1209,13 @@ export default function ActivitiesPage() {
                         {activity.openingHoursSummary && (
                           <p className="mt-2 text-xs text-slate-500">
                             Horaires : {activity.openingHoursSummary}
+                          </p>
+                        )}
+
+                        {dogMode && (
+                          <p className="mt-3 text-xs text-teal-700">
+                            Chien : estimation basée sur le type de lieu. Vérifiez
+                            les règles locales, les zones interdites et la laisse.
                           </p>
                         )}
 
@@ -1084,6 +1291,13 @@ export default function ActivitiesPage() {
                     {formatSimpleEuro(activitiesTotal)}
                   </span>
                 </div>
+
+                {dogMode && (
+                  <div className="flex justify-between gap-4 text-teal-700">
+                    <span>Mode chien</span>
+                    <span className="font-semibold">Activé</span>
+                  </div>
+                )}
 
                 {budget !== null && (
                   <div className="flex justify-between gap-4">

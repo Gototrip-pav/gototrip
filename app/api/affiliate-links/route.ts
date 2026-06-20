@@ -13,10 +13,18 @@ type AffiliateLinkPayload = {
   checkin?: string;
   checkout?: string;
   persons?: number;
+  pets?: boolean;
+  hasDog?: boolean;
 };
 
 function cleanValue(value: string | null | undefined) {
   return String(value || '').trim();
+}
+
+function isTruthy(value: unknown) {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  return ['1', 'true', 'yes', 'oui', 'on'].includes(normalized);
 }
 
 function getBookingBaseAffiliateUrl() {
@@ -37,6 +45,8 @@ function buildBookingSearchUrl({
   checkin,
   checkout,
   persons,
+  pets,
+  hasDog,
 }: AffiliateLinkPayload) {
   const destination = [cleanValue(city), cleanValue(country)]
     .filter(Boolean)
@@ -60,6 +70,10 @@ function buildBookingSearchUrl({
     bookingUrl.searchParams.set('group_adults', String(Number(persons)));
     bookingUrl.searchParams.set('no_rooms', '1');
     bookingUrl.searchParams.set('group_children', '0');
+  }
+
+  if (pets || hasDog) {
+    bookingUrl.searchParams.set('pets', '1');
   }
 
   bookingUrl.searchParams.set('selected_currency', 'EUR');
@@ -213,6 +227,12 @@ export async function GET(request: Request) {
     checkin: cleanValue(searchParams.get('checkin')),
     checkout: cleanValue(searchParams.get('checkout')),
     persons: Number(searchParams.get('persons') || 1),
+    pets:
+      isTruthy(searchParams.get('pets')) ||
+      isTruthy(searchParams.get('petFriendly')),
+    hasDog:
+      isTruthy(searchParams.get('hasDog')) ||
+      isTruthy(searchParams.get('dogFriendly')),
   };
 
   const shouldRedirect = searchParams.get('redirect') === '1';

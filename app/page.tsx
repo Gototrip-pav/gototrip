@@ -23,6 +23,7 @@ import {
   Compass,
   Gem,
   Check,
+  PawPrint,
 } from 'lucide-react';
 
 type FilterButtonProps = {
@@ -156,6 +157,7 @@ export default function HomePage() {
     'surprising',
   ]);
   const [lodgings, setLodgings] = useState<LodgingId[]>([]);
+  const [hasDog, setHasDog] = useState(false);
 
   const canSubmit = useMemo(() => {
     return (
@@ -305,6 +307,7 @@ export default function HomePage() {
     query.set('budget', String(Number(budget)));
     query.set('duration', String(Number(duration)));
     query.set('destinationStyle', destinationStyles.join(','));
+    query.set('hasDog', hasDog ? '1' : '0');
 
     if (startDate) {
       query.set('start', startDate);
@@ -332,6 +335,9 @@ export default function HomePage() {
       destinationStyles,
       lodging: selectedLodgings,
       lodgings,
+      hasDog,
+      travelWithDog: hasDog,
+      pets: hasDog ? ['dog'] : [],
     };
 
     localStorage.setItem('gt_criteria', JSON.stringify(criteria));
@@ -497,6 +503,47 @@ export default function HomePage() {
             </div>
 
             <div>
+              <h2 className="mb-3 text-sm font-bold">Animaux</h2>
+
+              <button
+                type="button"
+                onClick={() => setHasDog((current) => !current)}
+                className={`flex w-full items-start gap-4 rounded-2xl border p-4 text-left transition ${
+                  hasDog
+                    ? 'border-teal-700 bg-teal-50'
+                    : 'border-slate-200 bg-white hover:bg-slate-50'
+                }`}
+              >
+                <div
+                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
+                    hasDog ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  <PawPrint className="h-5 w-5" />
+                </div>
+
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-900">
+                      Je voyage avec un chien
+                    </span>
+
+                    {hasDog && (
+                      <span className="rounded-full bg-teal-700 px-2 py-0.5 text-xs font-semibold text-white">
+                        Activé
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="mt-1 text-sm text-slate-600">
+                    Gototrip favorisera les balades, parcs, activités extérieures,
+                    terrasses et hébergements acceptant les animaux.
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            <div>
               <h2 className="mb-3 text-sm font-bold">Environnements</h2>
 
               <p className="mb-3 text-xs text-slate-500">
@@ -641,6 +688,10 @@ export default function HomePage() {
               <FeatureLine
                 title="Sélection multiple"
                 text="Classique, surprenante, décalée, mer, montagne, ville, nature et hébergements peuvent être combinés."
+              />
+              <FeatureLine
+                title="Voyage avec chien"
+                text="Gototrip peut favoriser les activités extérieures et les hébergements acceptant les animaux."
               />
               <FeatureLine
                 title="Effet pépite"

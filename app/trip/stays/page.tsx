@@ -17,6 +17,7 @@ import {
   Info,
   BedDouble,
   House,
+  PawPrint,
 } from 'lucide-react';
 import TripMap from '../../components/TripMap';
 
@@ -50,6 +51,7 @@ type Stay = {
   imageUrl?: string;
   bookingId?: number | string;
   available?: boolean;
+  petFriendly?: boolean;
 };
 
 type TripSelection = {
@@ -63,6 +65,9 @@ type TripSelection = {
   budget?: number | null;
   lodging?: string;
   lodgings?: string[];
+  hasDog?: boolean;
+  travelWithDog?: boolean;
+  pets?: string[];
   selections?: {
     activities?: any[];
     restaurants?: any[];
@@ -73,7 +78,7 @@ type TripSelection = {
     restaurants?: number;
     stays?: number;
     transport?: number;
-    overall?: number;
+    overall: number;
   };
 };
 
@@ -85,6 +90,31 @@ type StayFilter = {
 };
 
 const STAY_FILTERS: StayFilter[] = [
+  {
+    id: 'petFriendly',
+    label: 'Animaux acceptés',
+    icon: <PawPrint className="h-4 w-4" />,
+    keywords: [
+      'pet',
+      'pets',
+      'dog',
+      'dogs',
+      'chien',
+      'animaux',
+      'accepts pets',
+      'pet friendly',
+      'dog friendly',
+      'camping',
+      'campground',
+      'apartment',
+      'appartement',
+      'house',
+      'maison',
+      'villa',
+      'holiday home',
+      'vacation rental',
+    ],
+  },
   {
     id: 'hotel',
     label: 'Hôtel',
@@ -161,6 +191,59 @@ function getStayHaystack(stay: Stay) {
   );
 }
 
+function isDogTravelEnabled(trip: TripSelection | null) {
+  if (!trip) return false;
+
+  return Boolean(
+    trip.hasDog ||
+      trip.travelWithDog ||
+      (Array.isArray(trip.pets) && trip.pets.includes('dog'))
+  );
+}
+
+function criteriaHasDog(criteria: any) {
+  return Boolean(
+    criteria?.hasDog ||
+      criteria?.travelWithDog ||
+      (Array.isArray(criteria?.pets) && criteria.pets.includes('dog'))
+  );
+}
+
+function isPetFriendlyStay(stay: Stay) {
+  if (stay.petFriendly) return true;
+
+  const haystack = getStayHaystack(stay);
+
+  const petFriendlyKeywords = [
+    'pet',
+    'pets',
+    'dog',
+    'dogs',
+    'chien',
+    'animaux',
+    'accepts pets',
+    'pet friendly',
+    'dog friendly',
+    'animaux acceptes',
+    'animaux acceptés',
+    'camping',
+    'campground',
+    'apartment',
+    'appartement',
+    'house',
+    'maison',
+    'villa',
+    'holiday home',
+    'vacation rental',
+    'gite',
+    'gîte',
+  ];
+
+  return petFriendlyKeywords.some((keyword) =>
+    haystack.includes(normalizeText(keyword))
+  );
+}
+
 function stayMatchesFilters(stay: Stay, filters: string[]) {
   if (filters.length === 0) return true;
 
@@ -170,9 +253,15 @@ function stayMatchesFilters(stay: Stay, filters: string[]) {
 
   const haystack = getStayHaystack(stay);
 
-  return selectedFilters.some((filter) =>
-    filter.keywords.some((keyword) => haystack.includes(normalizeText(keyword)))
-  );
+  return selectedFilters.some((filter) => {
+    if (filter.id === 'petFriendly') {
+      return isPetFriendlyStay(stay);
+    }
+
+    return filter.keywords.some((keyword) =>
+      haystack.includes(normalizeText(keyword))
+    );
+  });
 }
 
 function getReadableTypes(stay: Stay) {
@@ -202,6 +291,10 @@ function generateStayDescription(stay: Stay, activeFilters: string[]) {
   const ratingText = stay.rating
     ? ` Il est noté ${stay.rating}/5 par les voyageurs.`
     : '';
+
+  if (activeFilters.includes('petFriendly') && isPetFriendlyStay(stay)) {
+    return `Hébergement estimé compatible avec un chien ou plus adapté aux animaux. Vérifiez toujours sur Booking les conditions exactes : frais animaux, taille acceptée, nombre d’animaux, règles internes et éventuel supplément.${ratingText}`;
+  }
 
   if (haystack.includes('hostel') || haystack.includes('auberge')) {
     return `Une option économique et pratique, adaptée aux voyageurs qui veulent limiter le budget hébergement.${ratingText}`;
@@ -240,6 +333,13 @@ function generateStayDescription(stay: Stay, activeFilters: string[]) {
 }
 
 function buildApiLodgingFilter(activeFilters: string[], trip?: TripSelection | null) {
+  if (activeFilters.includes('petFriendly')) {
+    if (activeFilters.includes('camping')) return 'camping';
+    if (activeFilters.includes('apartment')) return 'appartement';
+    if (activeFilters.includes('house')) return 'maison';
+    return 'hotel';
+  }
+
   if (activeFilters.includes('camping')) return 'camping';
   if (activeFilters.includes('hostel')) return 'auberge';
   if (activeFilters.includes('apartment')) return 'appartement';
@@ -263,7 +363,7 @@ function normalizeStay(raw: any): Stay {
       ? raw.pricePerNightPerPerson
       : Number(raw.pricePerNightPerPerson);
 
-  return {
+  const baseStay: Stay = {
     id: raw.id,
     name: raw.name,
     address: raw.address || '',
@@ -288,6 +388,14 @@ function normalizeStay(raw: any): Stay {
     imageUrl: raw.imageUrl || '',
     bookingId: raw.bookingId,
     available: Boolean(raw.available ?? true),
+    petFriendly: Boolean(
+      raw.petFriendly || raw.acceptsPets || raw.dogFriendly || raw.allowsPets
+    ),
+  };
+
+  return {
+    ...baseStay,
+    petFriendly: baseStay.petFriendly || isPetFriendlyStay(baseStay),
   };
 }
 
@@ -303,7 +411,7 @@ function getCheckoutDate(start: string | null | undefined, nights: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function parseInitialStayFilters(trip: TripSelection | null) {
+function parseInitialStayFilters(trip: TripSelection | null): string[] {
   if (!trip) return [];
 
   const rawValues = [
@@ -314,7 +422,7 @@ function parseInitialStayFilters(trip: TripSelection | null) {
       .filter(Boolean),
   ];
 
-  const mapped = rawValues
+  const mapped: string[] = rawValues
     .map((value) => {
       const normalized = normalizeText(value);
 
@@ -339,11 +447,15 @@ function parseInitialStayFilters(trip: TripSelection | null) {
   return Array.from(new Set(mapped));
 }
 
-function buildBookingAffiliatePath(trip: TripSelection | null) {
+function buildBookingAffiliatePath(
+  trip: TripSelection | null,
+  forcePetFriendly = false
+) {
   if (!trip?.destination) return '#';
 
   const checkin = trip.startDate || trip.start || '';
   const checkout = getCheckoutDate(checkin, trip.nights || 1);
+  const dogMode = forcePetFriendly || isDogTravelEnabled(trip);
 
   const params = new URLSearchParams({
     provider: 'booking',
@@ -359,6 +471,11 @@ function buildBookingAffiliatePath(trip: TripSelection | null) {
 
   if (checkout) {
     params.set('checkout', checkout);
+  }
+
+  if (dogMode) {
+    params.set('pets', '1');
+    params.set('hasDog', '1');
   }
 
   return `/api/affiliate-links?${params.toString()}`;
@@ -384,6 +501,7 @@ export default function StaysPage() {
     const rawFilters = localStorage.getItem('gt_stay_filters');
 
     let parsedSelection: TripSelection | null = null;
+    let parsedCriteria: any = null;
 
     if (rawSelection) {
       try {
@@ -393,45 +511,79 @@ export default function StaysPage() {
       }
     }
 
+    if (rawCriteria) {
+      try {
+        parsedCriteria = JSON.parse(rawCriteria);
+      } catch {
+        parsedCriteria = null;
+      }
+    }
+
     if (!parsedSelection) {
       router.push('/destinations');
       return;
     }
 
-    setTrip(parsedSelection);
+    const dogEnabled =
+      isDogTravelEnabled(parsedSelection) || criteriaHasDog(parsedCriteria);
 
-    const previousStay = parsedSelection.selections?.stays?.[0] || null;
+    const normalizedSelection: TripSelection = {
+      ...parsedSelection,
+      hasDog: dogEnabled,
+      travelWithDog: dogEnabled,
+      pets: dogEnabled ? ['dog'] : parsedSelection.pets || [],
+    };
+
+    setTrip(normalizedSelection);
+
+    const previousStay = normalizedSelection.selections?.stays?.[0] || null;
 
     if (previousStay) {
-      setSelectedStay(previousStay);
+      setSelectedStay({
+        ...previousStay,
+        link: buildBookingAffiliatePath(normalizedSelection, dogEnabled),
+      });
     }
+
+    const initialFilters = parseInitialStayFilters(normalizedSelection);
 
     if (rawFilters) {
       try {
         const parsedFilters = JSON.parse(rawFilters);
+        const filters: string[] = Array.isArray(parsedFilters.filters)
+          ? parsedFilters.filters
+          : initialFilters;
 
-        if (Array.isArray(parsedFilters.filters)) {
-          setActiveFilters(parsedFilters.filters);
-        }
+        setActiveFilters(
+          dogEnabled && !filters.includes('petFriendly')
+            ? ['petFriendly', ...filters]
+            : filters
+        );
       } catch {
-        setActiveFilters(parseInitialStayFilters(parsedSelection));
+        setActiveFilters(
+          dogEnabled && !initialFilters.includes('petFriendly')
+            ? ['petFriendly', ...initialFilters]
+            : initialFilters
+        );
       }
     } else {
-      setActiveFilters(parseInitialStayFilters(parsedSelection));
+      setActiveFilters(
+        dogEnabled && !initialFilters.includes('petFriendly')
+          ? ['petFriendly', ...initialFilters]
+          : initialFilters
+      );
     }
 
-    if (typeof parsedSelection.budget === 'number' && parsedSelection.budget > 0) {
-      setBudget(parsedSelection.budget);
-    } else if (rawCriteria) {
-      try {
-        const parsedCriteria = JSON.parse(rawCriteria);
-        const criteriaBudget = Number(parsedCriteria.budget || 0);
+    if (
+      typeof normalizedSelection.budget === 'number' &&
+      normalizedSelection.budget > 0
+    ) {
+      setBudget(normalizedSelection.budget);
+    } else if (parsedCriteria) {
+      const criteriaBudget = Number(parsedCriteria.budget || 0);
 
-        if (Number.isFinite(criteriaBudget) && criteriaBudget > 0) {
-          setBudget(criteriaBudget);
-        }
-      } catch {
-        setBudget(null);
+      if (Number.isFinite(criteriaBudget) && criteriaBudget > 0) {
+        setBudget(criteriaBudget);
       }
     }
   }, [router]);
@@ -446,6 +598,7 @@ export default function StaysPage() {
 
         const checkin = trip.startDate || trip.start || '';
         const checkout = getCheckoutDate(checkin, trip.nights);
+        const dogMode = activeFilters.includes('petFriendly') || isDogTravelEnabled(trip);
 
         const params = new URLSearchParams({
           lat: String(trip.destination.lat),
@@ -464,6 +617,12 @@ export default function StaysPage() {
 
         if (checkout) {
           params.set('checkout', checkout);
+        }
+
+        if (dogMode) {
+          params.set('hasDog', '1');
+          params.set('petFriendly', '1');
+          params.set('pets', '1');
         }
 
         const res = await fetch(`/api/stays?${params.toString()}`, {
@@ -502,17 +661,33 @@ export default function StaysPage() {
   }, [trip, activeFilters]);
 
   const filteredStays = useMemo(() => {
+    const dogMode = activeFilters.includes('petFriendly');
+
     return stays
       .map((stay) => ({
         ...stay,
         description: generateStayDescription(stay, activeFilters),
       }))
-      .filter((stay) => stayMatchesFilters(stay, activeFilters));
+      .filter((stay) => stayMatchesFilters(stay, activeFilters))
+      .sort((a, b) => {
+        if (!dogMode) return 0;
+
+        const aPet = isPetFriendlyStay(a);
+        const bPet = isPetFriendlyStay(b);
+
+        if (aPet && !bPet) return -1;
+        if (!aPet && bPet) return 1;
+
+        return Number(b.rating || 0) - Number(a.rating || 0);
+      });
   }, [stays, activeFilters]);
 
   const persons = trip?.persons || 1;
   const nights = trip?.nights || 1;
-  const bookingAffiliatePath = buildBookingAffiliatePath(trip);
+  const dogMode = Boolean(
+    trip && (activeFilters.includes('petFriendly') || isDogTravelEnabled(trip))
+  );
+  const bookingAffiliatePath = buildBookingAffiliatePath(trip, dogMode);
 
   const staysTotal = useMemo(() => {
     if (!selectedStay) return 0;
@@ -557,9 +732,12 @@ export default function StaysPage() {
     setSelectedStay((current) => {
       if (current?.id === stay.id) return null;
 
+      const selectedPetFriendly = isPetFriendlyStay(stay);
+
       return {
         ...stay,
-        link: bookingAffiliatePath,
+        petFriendly: selectedPetFriendly,
+        link: buildBookingAffiliatePath(trip, dogMode || selectedPetFriendly),
         description: stay.description || generateStayDescription(stay, activeFilters),
       };
     });
@@ -568,11 +746,25 @@ export default function StaysPage() {
   const goNext = () => {
     if (!trip || !canContinue) return;
 
-    const selectedStays = selectedStay ? [selectedStay] : [];
+    const selectedStays = selectedStay
+      ? [
+          {
+            ...selectedStay,
+            petFriendly: isPetFriendlyStay(selectedStay),
+            link: buildBookingAffiliatePath(
+              trip,
+              dogMode || isPetFriendlyStay(selectedStay)
+            ),
+          },
+        ]
+      : [];
 
     const nextSelection: TripSelection = {
       ...trip,
       budget,
+      hasDog: isDogTravelEnabled(trip),
+      travelWithDog: isDogTravelEnabled(trip),
+      pets: isDogTravelEnabled(trip) ? ['dog'] : trip.pets || [],
       lodging: buildApiLodgingFilter(activeFilters, trip),
       selections: {
         activities: trip.selections?.activities || [],
@@ -667,6 +859,13 @@ export default function StaysPage() {
             personne(s) • {nights} nuit(s)
             {budget ? <> • budget {formatEuro(budget)}</> : null}
           </p>
+
+          {dogMode && (
+            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-teal-200 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-800">
+              <PawPrint className="h-4 w-4" />
+              Voyage avec chien : logements animaux acceptés priorisés
+            </div>
+          )}
         </div>
 
         <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
@@ -699,8 +898,9 @@ export default function StaysPage() {
           </div>
 
           <p className="mt-3 text-xs text-slate-500">
-            Les hébergements sont actuellement trouvés via Google Places. Le bouton
-            “Voir sur Booking” ouvre une recherche Booking avec votre lien affilié CJ.
+            En mode chien, Gototrip privilégie les logements estimés compatibles
+            avec les animaux. Vérifiez toujours sur Booking les frais, conditions,
+            taille acceptée et règles de l’établissement.
           </p>
         </section>
 
@@ -735,6 +935,7 @@ export default function StaysPage() {
                     : Number(stay.pricePerNightPerPerson || 0) * persons * nights;
 
                 const readableTypes = getReadableTypes(stay);
+                const petFriendly = isPetFriendlyStay(stay);
 
                 return (
                   <article
@@ -765,6 +966,13 @@ export default function StaysPage() {
                           {stay.available && (
                             <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
                               Disponible estimé
+                            </span>
+                          )}
+
+                          {dogMode && petFriendly && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700">
+                              <PawPrint className="h-3.5 w-3.5" />
+                              Animaux acceptés estimé
                             </span>
                           )}
                         </div>
@@ -808,6 +1016,13 @@ export default function StaysPage() {
                           ))}
                         </div>
 
+                        {dogMode && (
+                          <p className="mt-3 text-xs text-teal-700">
+                            Chien : vérifiez les frais animaux, la taille acceptée,
+                            le nombre d’animaux autorisé et les règles internes.
+                          </p>
+                        )}
+
                         <p className="mt-3 text-xs text-slate-500">
                           Prix et disponibilité à confirmer sur Booking.
                         </p>
@@ -842,7 +1057,7 @@ export default function StaysPage() {
                         </button>
 
                         <a
-                          href={bookingAffiliatePath}
+                          href={buildBookingAffiliatePath(trip, dogMode || petFriendly)}
                           target="_blank"
                           rel="noreferrer"
                           className="mt-2 block rounded-xl border border-teal-200 px-4 py-2 text-center text-xs font-semibold text-teal-700 hover:bg-teal-50"
@@ -879,6 +1094,13 @@ export default function StaysPage() {
                     {selectedStay ? '1' : '0'}
                   </span>
                 </div>
+
+                {dogMode && (
+                  <div className="flex justify-between gap-4 text-teal-700">
+                    <span>Mode chien</span>
+                    <span className="font-semibold">Activé</span>
+                  </div>
+                )}
 
                 <div className="flex justify-between gap-4">
                   <span>Activités</span>

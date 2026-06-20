@@ -26,8 +26,8 @@ function getGetYourGuideAffiliateUrl() {
   return process.env.GETYOURGUIDE_AFFILIATE_URL || '';
 }
 
-function getGetYourGuideDeepLinkTemplate() {
-  return process.env.GETYOURGUIDE_DEEPLINK_TEMPLATE || '';
+function getGetYourGuidePartnerId() {
+  return process.env.GETYOURGUIDE_PARTNER_ID || '';
 }
 
 function buildBookingSearchUrl({
@@ -89,6 +89,9 @@ function buildBookingAffiliateUrl(payload: AffiliateLinkPayload) {
     affiliateConfigured: Boolean(cjAffiliateUrl),
     destinationUrl: bookingDestinationUrl,
     url: attachDestinationToCjLink(cjAffiliateUrl, bookingDestinationUrl),
+    note: cjAffiliateUrl
+      ? 'Lien Booking CJ utilisé avec destination dynamique.'
+      : 'Aucun lien CJ Booking configuré. Gototrip ouvre la recherche Booking standard.',
   };
 }
 
@@ -106,37 +109,42 @@ function buildGetYourGuideSearchUrl({ city, country }: AffiliateLinkPayload) {
   return getYourGuideUrl.toString();
 }
 
+function buildGetYourGuidePartnerUrl(payload: AffiliateLinkPayload) {
+  const partnerId = cleanValue(getGetYourGuidePartnerId());
+  const destinationUrl = buildGetYourGuideSearchUrl(payload);
+
+  const url = new URL(destinationUrl);
+
+  if (partnerId) {
+    url.searchParams.set('partner_id', partnerId);
+  }
+
+  return {
+    provider: 'getyourguide' as const,
+    affiliateConfigured: Boolean(partnerId),
+    destinationUrl,
+    url: url.toString(),
+    note: partnerId
+      ? 'Lien GetYourGuide dynamique utilisé avec partner_id.'
+      : 'GETYOURGUIDE_PARTNER_ID non configuré. Gototrip ouvre la recherche GetYourGuide sans tracking partenaire.',
+  };
+}
+
 function isShortFixedGetYourGuideLink(url: string) {
   const cleanUrl = cleanValue(url).toLowerCase();
 
   return cleanUrl.includes('gyg.me/');
 }
 
-function buildGetYourGuideDeepLink(destinationUrl: string) {
-  const template = getGetYourGuideDeepLinkTemplate();
-
-  if (!template) return '';
-
-  return template
-    .replaceAll('{url}', encodeURIComponent(destinationUrl))
-    .replaceAll('{destinationUrl}', encodeURIComponent(destinationUrl))
-    .replaceAll('{destination_url}', encodeURIComponent(destinationUrl));
-}
-
 function buildGetYourGuideAffiliateUrl(payload: AffiliateLinkPayload) {
+  const partnerId = cleanValue(getGetYourGuidePartnerId());
+
+  if (partnerId) {
+    return buildGetYourGuidePartnerUrl(payload);
+  }
+
   const destinationUrl = buildGetYourGuideSearchUrl(payload);
   const affiliateUrl = getGetYourGuideAffiliateUrl();
-  const deepLinkUrl = buildGetYourGuideDeepLink(destinationUrl);
-
-  if (deepLinkUrl) {
-    return {
-      provider: 'getyourguide' as const,
-      affiliateConfigured: true,
-      destinationUrl,
-      url: deepLinkUrl,
-      note: 'Lien GetYourGuide dynamique utilisé.',
-    };
-  }
 
   if (affiliateUrl && !isShortFixedGetYourGuideLink(affiliateUrl)) {
     return {
@@ -144,7 +152,8 @@ function buildGetYourGuideAffiliateUrl(payload: AffiliateLinkPayload) {
       affiliateConfigured: true,
       destinationUrl,
       url: affiliateUrl,
-      note: 'Lien affilié GetYourGuide utilisé.',
+      note:
+        'Lien affilié GetYourGuide utilisé. Attention : il peut être fixe si la destination n’est pas dynamique.',
     };
   }
 
@@ -155,8 +164,8 @@ function buildGetYourGuideAffiliateUrl(payload: AffiliateLinkPayload) {
     url: destinationUrl,
     note:
       affiliateUrl && isShortFixedGetYourGuideLink(affiliateUrl)
-        ? 'Le lien court GetYourGuide est fixe. Gototrip ouvre donc la bonne recherche destination pour éviter de renvoyer vers Paris.'
-        : 'Aucun lien affilié GetYourGuide dynamique configuré. Gototrip ouvre la recherche destination.',
+        ? 'Le lien court GetYourGuide est fixe. Gototrip ouvre donc la bonne recherche destination pour éviter de renvoyer vers une autre ville.'
+        : 'Aucun partner_id GetYourGuide configuré. Gototrip ouvre la recherche destination.',
   };
 }
 

@@ -310,7 +310,7 @@ export default function HomePage() {
   return (
     <main className="min-h-screen bg-white text-slate-950">
       <header className="sticky top-0 z-20 border-b border-slate-100 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
+        <div className="mx-auto flex max-w-7xl items-center px-6 py-3">
           <button
             type="button"
             onClick={() => router.push('/')}
@@ -320,26 +320,6 @@ export default function HomePage() {
               <Waves className="h-4 w-4" />
             </div>
             <span className="text-xl font-extrabold">Gototrip</span>
-          </button>
-
-          <nav className="hidden items-center gap-8 text-sm text-slate-700 md:flex">
-            <a href="#fonctionnalites" className="hover:text-slate-950">
-              Fonctionnalités
-            </a>
-            <a href="#inspiration" className="hover:text-slate-950">
-              Inspiration
-            </a>
-            <a href="#contact" className="hover:text-slate-950">
-              Contact
-            </a>
-          </nav>
-
-          <button
-            type="button"
-            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-            className="rounded-full bg-slate-950 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            Ouvrir l’app
           </button>
         </div>
       </header>
@@ -592,10 +572,7 @@ export default function HomePage() {
         </div>
 
         <div className="space-y-6">
-          <section
-            id="inspiration"
-            className="rounded-3xl border border-teal-100 bg-teal-50 p-6 md:p-8"
-          >
+          <section className="rounded-3xl border border-teal-100 bg-teal-50 p-6 md:p-8">
             <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-sm font-semibold text-teal-700">
               <Gem className="h-4 w-4" />
               Nouveau
@@ -619,10 +596,7 @@ export default function HomePage() {
             </div>
           </section>
 
-          <section
-            id="fonctionnalites"
-            className="rounded-3xl border border-slate-200 bg-white p-6 md:p-8"
-          >
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 md:p-8">
             <h2 className="mb-4 text-2xl font-extrabold">Fonctionnalités</h2>
 
             <div className="grid gap-3">
@@ -654,10 +628,6 @@ export default function HomePage() {
           </section>
         </div>
       </section>
-
-      <footer className="border-t border-slate-100 px-6 py-8 text-center text-sm text-slate-500">
-        © 2026 Gototrip
-      </footer>
     </main>
   );
 }

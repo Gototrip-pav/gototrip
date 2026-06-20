@@ -1,10 +1,24 @@
-export const metadata = { title: "Gototrip", description: "Planifiez votre voyage de A à Z." };
-import "./styles/globals.css";
+import type { Metadata } from 'next';
+import SiteFooter from './components/SiteFooter';
+import './styles/globals.css';
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export const metadata: Metadata = {
+  title: 'Gototrip',
+  description:
+    'Gototrip vous aide à planifier votre voyage : destinations, activités, restaurants, hébergements, transport et planning jour par jour.',
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html lang="fr">
-      <body>{children}</body>
+      <body>
+        {children}
+        <SiteFooter />
+      </body>
     </html>
   );
 }

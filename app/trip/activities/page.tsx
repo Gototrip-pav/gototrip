@@ -251,6 +251,16 @@ function getActivityHaystack(activity: Activity) {
   );
 }
 
+function getPositiveRawPrice(value: unknown) {
+  const price = Number(value);
+
+  if (Number.isFinite(price) && price > 0) {
+    return price;
+  }
+
+  return null;
+}
+
 function isPaidActivity(activity: Activity) {
   const haystack = getActivityHaystack(activity);
 
@@ -305,6 +315,8 @@ function isActuallyFreeActivity(activity: Activity) {
     'monument',
     'bridge',
     'market',
+    'church',
+    'cathedral',
   ];
 
   return freeKeywords.some((keyword) => haystack.includes(normalizeText(keyword)));
@@ -321,7 +333,7 @@ function activityMatchesFilters(activity: Activity, filters: string[]) {
 
   return selectedFilters.some((filter) => {
     if (filter.id === 'free') {
-      return activity.pricePerPerson === 0 || isActuallyFreeActivity(activity);
+      return isActuallyFreeActivity(activity);
     }
 
     return filter.keywords.some((keyword) =>
@@ -332,6 +344,7 @@ function activityMatchesFilters(activity: Activity, filters: string[]) {
 
 function estimateActivityPrice(activity: Activity) {
   const haystack = getActivityHaystack(activity);
+  const positiveRawPrice = getPositiveRawPrice(activity.pricePerPerson);
 
   if (isActuallyFreeActivity(activity)) return 0;
 
@@ -352,9 +365,7 @@ function estimateActivityPrice(activity: Activity) {
   if (haystack.includes('fitness_center')) return 15;
   if (haystack.includes('tour')) return 30;
 
-  return Number.isFinite(Number(activity.pricePerPerson))
-    ? Number(activity.pricePerPerson)
-    : 20;
+  return positiveRawPrice ?? 20;
 }
 
 function getReadableTypes(activity: Activity) {
@@ -446,14 +457,15 @@ function generateActivityDescription(activity: Activity, activeFilters: string[]
 }
 
 function buildApiFilter(activeFilters: string[]) {
-  if (activeFilters.includes('free')) return 'Gratuit';
-  if (activeFilters.includes('nature')) return 'Nature';
-  if (activeFilters.includes('culture')) return 'Culture';
-  if (activeFilters.includes('cinema')) return 'Cinéma';
-  if (activeFilters.includes('nightlife')) return 'Boîte de nuit';
-  if (activeFilters.includes('sport')) return 'Sportif';
-  if (activeFilters.includes('family')) return 'En famille';
-  if (activeFilters.includes('kids')) return 'Enfants';
+  const filtersWithoutFree = activeFilters.filter((filter) => filter !== 'free');
+
+  if (filtersWithoutFree.includes('nature')) return 'Nature';
+  if (filtersWithoutFree.includes('culture')) return 'Culture';
+  if (filtersWithoutFree.includes('cinema')) return 'Cinéma';
+  if (filtersWithoutFree.includes('nightlife')) return 'Boîte de nuit';
+  if (filtersWithoutFree.includes('sport')) return 'Sportif';
+  if (filtersWithoutFree.includes('family')) return 'En famille';
+  if (filtersWithoutFree.includes('kids')) return 'Enfants';
 
   return '';
 }
@@ -498,7 +510,7 @@ function normalizeActivity(raw: any): Activity {
   if (baseActivity.source === 'GetYourGuide') {
     return {
       ...baseActivity,
-      pricePerPerson: Number.isFinite(rawPrice) ? rawPrice : 30,
+      pricePerPerson: getPositiveRawPrice(rawPrice) ?? 30,
     };
   }
 
@@ -871,9 +883,8 @@ export default function ActivitiesPage() {
           </div>
 
           <p className="mt-3 text-xs text-slate-500">
-            Les activités sont proposées via Google Places ou GetYourGuide selon les
-            intégrations disponibles. Le bouton “Réserver sur GetYourGuide” ouvre
-            votre lien affilié GetYourGuide.
+            Le filtre “Gratuit” affiche uniquement les activités réellement estimées
+            gratuites. Il ne remet plus les prix des autres activités à 0€.
           </p>
         </section>
 
@@ -904,6 +915,7 @@ export default function ActivitiesPage() {
                 const selected = selectedIds.includes(activity.id);
                 const total = Number(activity.pricePerPerson || 0) * persons;
                 const readableTypes = getReadableTypes(activity);
+                const isFree = isActuallyFreeActivity(activity);
 
                 return (
                   <article
@@ -931,7 +943,7 @@ export default function ActivitiesPage() {
                             </span>
                           )}
 
-                          {activity.pricePerPerson === 0 && (
+                          {isFree && (
                             <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
                               Gratuit estimé
                             </span>

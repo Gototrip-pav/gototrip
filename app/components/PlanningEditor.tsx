@@ -157,13 +157,7 @@ function makeEditableId(dayIndex: number, slotIndex: number) {
 }
 
 function getInitialDays(props: PlanningEditorProps) {
-  return (
-    props.planning ||
-    props.days ||
-    props.initialDays ||
-    props.value ||
-    []
-  );
+  return props.planning || props.days || props.initialDays || props.value || [];
 }
 
 function normalizeSlot(slot: PlanningSlot, dayIndex: number, slotIndex: number): EditableSlot {
@@ -239,13 +233,6 @@ function isWakeSlot(slot: EditableSlot) {
   const title = String(slot.title || '').toLowerCase();
 
   return type.includes('wake') || title.includes('lever plus tard');
-}
-
-function isFreeSlot(slot: EditableSlot) {
-  const type = String(slot.type || '').toLowerCase();
-  const title = String(slot.title || '').toLowerCase();
-
-  return type.includes('free') || title.includes('temps libre');
 }
 
 function isRestaurantSlot(slot: EditableSlot) {
@@ -328,9 +315,9 @@ function recalculateDay(day: EditableDay): EditableDay {
 
   const recalculatedWakeSlots = wakeSlots.map((slot, index) => {
     const duration = parseDurationFromSlot(slot);
-    const start = WAKE_BASE_END + wakeSlots
-      .slice(0, index)
-      .reduce((sum, item) => sum + parseDurationFromSlot(item), 0);
+    const start =
+      WAKE_BASE_END +
+      wakeSlots.slice(0, index).reduce((sum, item) => sum + parseDurationFromSlot(item), 0);
 
     return updateSlotTime(slot, start, duration);
   });
@@ -475,43 +462,33 @@ function createWakeSlot(dayIndex: number, duration = 60): EditableSlot {
   };
 }
 
-function DurationSelector({
-  label,
-  duration,
-  onDecrease,
-  onIncrease,
+function SlotActionButton({
+  children,
+  onClick,
+  disabled = false,
+  danger = false,
+  title,
 }: {
-  label: string;
-  duration: number;
-  onDecrease: () => void;
-  onIncrease: () => void;
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  title?: string;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-      <span className="font-semibold text-slate-700">{label}</span>
-
-      <button
-        type="button"
-        onClick={onDecrease}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
-        aria-label="Réduire la durée"
-      >
-        <Minus className="h-4 w-4" />
-      </button>
-
-      <span className="min-w-16 text-center font-bold text-slate-900">
-        {formatDuration(duration)}
-      </span>
-
-      <button
-        type="button"
-        onClick={onIncrease}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
-        aria-label="Augmenter la durée"
-      >
-        <Plus className="h-4 w-4" />
-      </button>
-    </div>
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex items-center justify-center rounded-xl border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-35 ${
+        danger
+          ? 'border-red-200 text-red-700 hover:bg-red-50'
+          : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -554,7 +531,7 @@ export default function PlanningEditor(props: PlanningEditorProps) {
     try {
       localStorage.setItem(storageKey, JSON.stringify(recalculated));
     } catch {
-      // localStorage indisponible : on continue sans bloquer l’éditeur.
+      // localStorage indisponible : on continue sans bloquer.
     }
 
     props.onChange?.(recalculated);
@@ -649,6 +626,10 @@ export default function PlanningEditor(props: PlanningEditorProps) {
     slotIndex: number,
     direction: -1 | 1
   ) => {
+    const slot = days[dayIndex]?.slots?.[slotIndex];
+
+    if (!slot || getSlotRole(slot) !== 'editable') return;
+
     const next = days.map((day, index) => {
       if (index !== dayIndex) return day;
 
@@ -657,8 +638,8 @@ export default function PlanningEditor(props: PlanningEditorProps) {
       if (targetIndex < 0 || targetIndex >= day.slots.length) return day;
 
       const slots = [...day.slots];
-      const [slot] = slots.splice(slotIndex, 1);
-      slots.splice(targetIndex, 0, slot);
+      const [currentSlot] = slots.splice(slotIndex, 1);
+      slots.splice(targetIndex, 0, currentSlot);
 
       return {
         ...day,
@@ -762,29 +743,44 @@ export default function PlanningEditor(props: PlanningEditorProps) {
   };
 
   const allWarnings = days.flatMap((day) => day.warnings || []);
+  const totalSlots = days.reduce((sum, day) => sum + day.slots.length, 0);
+  const totalTravelMinutes = days.reduce(
+    (sum, day) =>
+      sum +
+      day.slots.reduce(
+        (daySum, slot) => daySum + Number(slot.travelTimeMinutes || 0),
+        0
+      ),
+    0
+  );
 
   if (!days.length) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center">
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 text-center lg:col-span-3">
         <h2 className="text-xl font-bold text-slate-900">Planning</h2>
         <p className="mt-2 text-sm text-slate-600">
           Aucun planning n’est encore disponible.
         </p>
-      </div>
+      </section>
     );
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5">
-      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-3">
+      <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
+          <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700">
+            <Clock className="h-4 w-4" />
+            Planning optimisé
+          </div>
+
           <h2 className="text-2xl font-extrabold text-slate-900">
             {props.title || 'Planning personnalisable'}
           </h2>
 
-          <p className="mt-1 text-sm text-slate-600">
+          <p className="mt-1 max-w-3xl text-sm text-slate-600">
             {props.subtitle ||
-              'Déplacez les étapes, ajoutez du temps libre ou décalez le réveil. Les horaires se recalculent automatiquement.'}
+              'Les étapes sont organisées en timeline. Vous pouvez déplacer les activités, ajuster les durées, ajouter du temps libre ou décaler le réveil.'}
           </p>
         </div>
 
@@ -798,8 +794,37 @@ export default function PlanningEditor(props: PlanningEditorProps) {
         </button>
       </div>
 
+      <div className="mb-6 grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Durée du voyage
+          </div>
+          <div className="mt-1 text-2xl font-extrabold text-slate-900">
+            {days.length} jour(s)
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Étapes prévues
+          </div>
+          <div className="mt-1 text-2xl font-extrabold text-slate-900">
+            {totalSlots}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Trajets estimés
+          </div>
+          <div className="mt-1 text-2xl font-extrabold text-slate-900">
+            {formatDuration(totalTravelMinutes)}
+          </div>
+        </div>
+      </div>
+
       {allWarnings.length > 0 && (
-        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           <div className="font-semibold">Attention planning</div>
           <div className="mt-1">
             Certains créneaux peuvent être fermés ou dépasser la plage prévue.
@@ -808,16 +833,13 @@ export default function PlanningEditor(props: PlanningEditorProps) {
       )}
 
       <div className="space-y-6">
-        {days.map((day, dayIndex) => {
-          const freeDuration = 60;
-          const wakeDuration = 60;
-
-          return (
-            <article
-              key={`day-${day.day || dayIndex + 1}`}
-              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-            >
-              <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        {days.map((day, dayIndex) => (
+          <article
+            key={`day-${day.day || dayIndex + 1}`}
+            className="overflow-hidden rounded-3xl border border-slate-200 bg-white"
+          >
+            <div className="border-b border-slate-200 bg-slate-50 p-5">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div>
                   <h3 className="text-xl font-extrabold text-slate-900">
                     {day.title || `Jour ${dayIndex + 1}`}
@@ -830,179 +852,187 @@ export default function PlanningEditor(props: PlanningEditorProps) {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <DurationSelector
-                    label="Ajouter temps libre"
-                    duration={freeDuration}
-                    onDecrease={() => addFreeTime(dayIndex, 45)}
-                    onIncrease={() => addFreeTime(dayIndex, 75)}
-                  />
+                  <button
+                    type="button"
+                    onClick={() => addFreeTime(dayIndex, 60)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Temps libre
+                  </button>
 
-                  <DurationSelector
-                    label="Se lever plus tard"
-                    duration={wakeDuration}
-                    onDecrease={() => addWakeLater(dayIndex, 45)}
-                    onIncrease={() => addWakeLater(dayIndex, 75)}
-                  />
+                  <button
+                    type="button"
+                    onClick={() => addWakeLater(dayIndex, 60)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Clock className="h-4 w-4" />
+                    Lever plus tard
+                  </button>
                 </div>
               </div>
+            </div>
 
-              <div className="space-y-3">
-                {day.slots.map((slot, slotIndex) => {
-                  const editable = getSlotRole(slot) === 'editable';
-                  const duration = parseDurationFromSlot(slot);
+            <div className="space-y-4 p-5">
+              {day.slots.map((slot, slotIndex) => {
+                const editable = getSlotRole(slot) === 'editable';
+                const duration = parseDurationFromSlot(slot);
+                const isDragging =
+                  dragged?.dayIndex === dayIndex && dragged?.slotIndex === slotIndex;
+                const isLast = slotIndex === day.slots.length - 1;
 
-                  return (
+                return (
+                  <div
+                    key={slot.editableId || `${day.day}-${slot.time}-${slotIndex}`}
+                    className="grid gap-3 md:grid-cols-[96px_28px_1fr]"
+                  >
+                    <div className="md:text-right">
+                      <div className="inline-flex rounded-xl bg-slate-900 px-3 py-1 text-sm font-bold text-white md:w-full md:justify-center">
+                        {slot.startTime || String(slot.time || '').split('-')[0]?.trim()}
+                      </div>
+
+                      <div className="mt-1 text-xs text-slate-500">
+                        jusqu’à {slot.endTime || String(slot.time || '').split('-')[1]?.trim()}
+                      </div>
+                    </div>
+
+                    <div className="hidden md:flex md:flex-col md:items-center">
+                      <div className="mt-1 h-4 w-4 rounded-full border-4 border-teal-100 bg-teal-600" />
+                      {!isLast && <div className="mt-2 h-full w-px bg-slate-200" />}
+                    </div>
+
                     <div
-                      key={slot.editableId || `${day.day}-${slot.time}-${slotIndex}`}
                       draggable={editable}
                       onDragStart={() => setDragged({ dayIndex, slotIndex })}
                       onDragOver={(event) => event.preventDefault()}
                       onDrop={() => handleDrop(dayIndex, slotIndex)}
-                      className={`rounded-2xl border bg-white p-4 shadow-sm ${
-                        editable
-                          ? 'border-slate-200 hover:border-teal-500'
-                          : 'border-slate-100 opacity-90'
+                      className={`rounded-2xl border p-4 transition ${
+                        isDragging
+                          ? 'border-teal-500 bg-teal-50 ring-2 ring-teal-100'
+                          : editable
+                            ? 'border-slate-200 bg-white hover:border-teal-400'
+                            : 'border-slate-200 bg-slate-50'
                       }`}
                     >
-                      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                        <div className="flex min-w-0 gap-3">
-                          <div className="pt-1">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
                             {editable ? (
-                              <GripVertical className="h-5 w-5 text-slate-400" />
+                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                                <GripVertical className="h-3.5 w-3.5" />
+                                Déplaçable
+                              </span>
                             ) : (
-                              <Clock className="h-5 w-5 text-slate-400" />
+                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
+                                <Clock className="h-3.5 w-3.5" />
+                                Fixe
+                              </span>
+                            )}
+
+                            <span className="rounded-full bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700">
+                              {slot.durationLabel || formatDuration(duration)}
+                            </span>
+
+                            {Number(slot.travelTimeMinutes || 0) > 0 && (
+                              <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
+                                Trajet {slot.travelTimeMinutes} min
+                                {Number(slot.travelDistanceKm || 0) > 0
+                                  ? ` • ${Number(slot.travelDistanceKm).toFixed(1)} km`
+                                  : ''}
+                              </span>
                             )}
                           </div>
 
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
-                                {slot.time}
-                              </span>
+                          <h4 className="mt-3 text-lg font-extrabold text-slate-900">
+                            {slot.title}
+                          </h4>
 
-                              {slot.durationLabel && (
-                                <span className="rounded-full bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700">
-                                  {slot.durationLabel}
-                                </span>
-                              )}
+                          {slot.subtitle && (
+                            <p className="mt-1 text-sm text-slate-500">
+                              {slot.subtitle}
+                            </p>
+                          )}
 
-                              {!editable && (
-                                <span className="rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
-                                  Fixe
-                                </span>
-                              )}
+                          {slot.description && (
+                            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-600">
+                              {slot.description}
+                            </p>
+                          )}
+
+                          {(slot.warning || slot.openingWarning) && (
+                            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                              {slot.warning || slot.openingWarning}
                             </div>
-
-                            <h4 className="mt-2 text-lg font-bold text-slate-900">
-                              {slot.title}
-                            </h4>
-
-                            {slot.subtitle && (
-                              <p className="mt-1 text-sm text-slate-500">
-                                {slot.subtitle}
-                              </p>
-                            )}
-
-                            {slot.description && (
-                              <p className="mt-2 text-sm text-slate-600">
-                                {slot.description}
-                              </p>
-                            )}
-
-                            {(slot.warning || slot.openingWarning) && (
-                              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                                {slot.warning || slot.openingWarning}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex shrink-0 flex-wrap gap-2 md:justify-end">
-                          {editable && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateSlotDuration(dayIndex, slotIndex, -15)
-                                }
-                                className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                              >
-                                <Minus className="h-3.5 w-3.5" />
-                                Durée
-                              </button>
-
-                              <span className="inline-flex items-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-900">
-                                {formatDuration(duration)}
-                              </span>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateSlotDuration(dayIndex, slotIndex, 15)
-                                }
-                                className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                                Durée
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  moveSlotWithinDay(dayIndex, slotIndex, -1)
-                                }
-                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                              >
-                                <ArrowUp className="h-3.5 w-3.5" />
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  moveSlotWithinDay(dayIndex, slotIndex, 1)
-                                }
-                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                              >
-                                <ArrowDown className="h-3.5 w-3.5" />
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => moveSlotToDay(dayIndex, slotIndex, -1)}
-                                disabled={dayIndex === 0}
-                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                <ArrowLeft className="h-3.5 w-3.5" />
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => moveSlotToDay(dayIndex, slotIndex, 1)}
-                                disabled={dayIndex === days.length - 1}
-                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                <ArrowRight className="h-3.5 w-3.5" />
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => removeSlot(dayIndex, slotIndex)}
-                                className="inline-flex items-center gap-1 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                Supprimer
-                              </button>
-                            </>
                           )}
                         </div>
+
+                        {editable && (
+                          <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+                            <SlotActionButton
+                              onClick={() => updateSlotDuration(dayIndex, slotIndex, -15)}
+                              title="Réduire la durée"
+                            >
+                              <Minus className="h-3.5 w-3.5" />
+                            </SlotActionButton>
+
+                            <span className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-900">
+                              {formatDuration(duration)}
+                            </span>
+
+                            <SlotActionButton
+                              onClick={() => updateSlotDuration(dayIndex, slotIndex, 15)}
+                              title="Augmenter la durée"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </SlotActionButton>
+
+                            <SlotActionButton
+                              onClick={() => moveSlotWithinDay(dayIndex, slotIndex, -1)}
+                              title="Monter"
+                            >
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </SlotActionButton>
+
+                            <SlotActionButton
+                              onClick={() => moveSlotWithinDay(dayIndex, slotIndex, 1)}
+                              title="Descendre"
+                            >
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </SlotActionButton>
+
+                            <SlotActionButton
+                              onClick={() => moveSlotToDay(dayIndex, slotIndex, -1)}
+                              disabled={dayIndex === 0}
+                              title="Jour précédent"
+                            >
+                              <ArrowLeft className="h-3.5 w-3.5" />
+                            </SlotActionButton>
+
+                            <SlotActionButton
+                              onClick={() => moveSlotToDay(dayIndex, slotIndex, 1)}
+                              disabled={dayIndex === days.length - 1}
+                              title="Jour suivant"
+                            >
+                              <ArrowRight className="h-3.5 w-3.5" />
+                            </SlotActionButton>
+
+                            <SlotActionButton
+                              onClick={() => removeSlot(dayIndex, slotIndex)}
+                              danger
+                              title="Supprimer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </SlotActionButton>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            </article>
-          );
-        })}
+                  </div>
+                );
+              })}
+            </div>
+          </article>
+        ))}
       </div>
     </section>
   );

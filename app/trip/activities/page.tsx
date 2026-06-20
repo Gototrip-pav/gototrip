@@ -313,7 +313,10 @@ function isActuallyFreeActivity(activity: Activity) {
 function activityMatchesFilters(activity: Activity, filters: string[]) {
   if (filters.length === 0) return true;
 
-  const selectedFilters = ACTIVITY_FILTERS.filter((f) => filters.includes(f.id));
+  const selectedFilters = ACTIVITY_FILTERS.filter((filter) =>
+    filters.includes(filter.id)
+  );
+
   const haystack = getActivityHaystack(activity);
 
   return selectedFilters.some((filter) => {
@@ -471,7 +474,9 @@ function normalizeActivity(raw: any): Activity {
     userRatingCount: raw.userRatingCount || 0,
     pricePerPerson: Number.isFinite(rawPrice) ? rawPrice : 20,
     priceTotal:
-      typeof raw.priceTotal === 'number' ? raw.priceTotal : Number(raw.priceTotal || 0),
+      typeof raw.priceTotal === 'number'
+        ? raw.priceTotal
+        : Number(raw.priceTotal || 0),
     currency: raw.currency || 'EUR',
     link: raw.link || raw.googleMapsUri || '#',
     googleMapsUri: raw.googleMapsUri || '',
@@ -503,6 +508,19 @@ function normalizeActivity(raw: any): Activity {
   };
 }
 
+function getActivityBookingPath(trip: TripSelection | null) {
+  if (!trip?.destination) return '#';
+
+  const params = new URLSearchParams({
+    provider: 'getyourguide',
+    city: trip.destination.city || '',
+    country: trip.destination.country || '',
+    redirect: '1',
+  });
+
+  return `/api/affiliate-links?${params.toString()}`;
+}
+
 export default function ActivitiesPage() {
   const router = useRouter();
 
@@ -513,7 +531,6 @@ export default function ActivitiesPage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [sourceWarning, setSourceWarning] = useState('');
 
   const [budget, setBudget] = useState<number | null>(null);
   const [acceptBudgetOverrun, setAcceptBudgetOverrun] = useState(false);
@@ -538,9 +555,12 @@ export default function ActivitiesPage() {
       return;
     }
 
+    const getYourGuideLink = getActivityBookingPath(parsedSelection);
+
     const previousActivities = (parsedSelection.selections?.activities || []).map(
       (activity) => ({
         ...activity,
+        link: activity.link || getYourGuideLink,
         pricePerPerson: Number(activity.pricePerPerson || 0),
         description:
           activity.description || generateActivityDescription(activity, []),
@@ -553,6 +573,7 @@ export default function ActivitiesPage() {
     if (rawFilters) {
       try {
         const parsedFilters = JSON.parse(rawFilters);
+
         if (Array.isArray(parsedFilters.filters)) {
           setActiveFilters(parsedFilters.filters);
         }
@@ -584,7 +605,6 @@ export default function ActivitiesPage() {
       try {
         setLoading(true);
         setError('');
-        setSourceWarning('');
 
         const params = new URLSearchParams({
           lat: String(trip.destination.lat),
@@ -621,17 +641,18 @@ export default function ActivitiesPage() {
           throw new Error(message);
         }
 
-        if (json.warning) {
-          setSourceWarning(json.warning);
-        }
-
         const rawActivities = Array.isArray(json.activities)
           ? json.activities
           : Array.isArray(json.places)
             ? json.places
             : [];
 
-        const mapped = rawActivities.map(normalizeActivity);
+        const getYourGuideLink = getActivityBookingPath(trip);
+
+        const mapped = rawActivities.map((rawActivity: any) => ({
+          ...normalizeActivity(rawActivity),
+          link: getYourGuideLink,
+        }));
 
         setActivities(mapped);
       } catch (e: any) {
@@ -658,6 +679,7 @@ export default function ActivitiesPage() {
   }, [activities, activeFilters]);
 
   const persons = trip?.persons || 1;
+  const getYourGuideLink = getActivityBookingPath(trip);
 
   const activitiesTotal = useMemo(() => {
     return selectedActivities.reduce(
@@ -705,6 +727,7 @@ export default function ActivitiesPage() {
 
       const activityToStore: Activity = {
         ...activity,
+        link: getYourGuideLink,
         pricePerPerson: Number(activity.pricePerPerson || 0),
         description:
           activity.description || generateActivityDescription(activity, activeFilters),
@@ -717,11 +740,16 @@ export default function ActivitiesPage() {
   const goNext = () => {
     if (!trip || !canContinue) return;
 
+    const selectedActivitiesWithLinks = selectedActivities.map((activity) => ({
+      ...activity,
+      link: activity.link || getYourGuideLink,
+    }));
+
     const nextSelection: TripSelection = {
       ...trip,
       budget,
       selections: {
-        activities: selectedActivities,
+        activities: selectedActivitiesWithLinks,
         restaurants: trip.selections?.restaurants || [],
         stays: trip.selections?.stays || [],
       },
@@ -783,6 +811,7 @@ export default function ActivitiesPage() {
       <div className="mx-auto max-w-7xl px-4 py-8">
         <div className="mb-6 flex flex-wrap gap-3">
           <button
+            type="button"
             onClick={goHome}
             className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
           >
@@ -791,6 +820,7 @@ export default function ActivitiesPage() {
           </button>
 
           <button
+            type="button"
             onClick={goBack}
             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
           >
@@ -841,23 +871,16 @@ export default function ActivitiesPage() {
           </div>
 
           <p className="mt-3 text-xs text-slate-500">
-            Gototrip essaie d’utiliser GetYourGuide si l’API est configurée.
-            Sinon, les résultats viennent de Google Places. Les activités déjà
-            sélectionnées gardent leur prix même si vous changez de filtre.
+            Les activités sont proposées via Google Places ou GetYourGuide selon les
+            intégrations disponibles. Le bouton “Réserver sur GetYourGuide” ouvre
+            votre lien affilié GetYourGuide.
           </p>
         </section>
 
         {loading && (
-          <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700 flex items-center gap-2">
+          <div className="mb-6 flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">
             <Loader2 className="h-4 w-4 animate-spin" />
             Chargement des activités autour de {trip.destination.city}...
-          </div>
-        )}
-
-        {sourceWarning && (
-          <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            <div className="font-semibold">Information source</div>
-            <div>{sourceWarning}</div>
           </div>
         )}
 
@@ -868,7 +891,7 @@ export default function ActivitiesPage() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-3">
-          <section className="lg:col-span-2 space-y-4">
+          <section className="space-y-4 lg:col-span-2">
             {filteredActivities.length === 0 && !loading ? (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center">
                 <h2 className="text-xl font-bold">Aucune activité trouvée</h2>
@@ -961,13 +984,19 @@ export default function ActivitiesPage() {
                           </p>
                         )}
 
+                        {activity.openingHoursSummary && (
+                          <p className="mt-2 text-xs text-slate-500">
+                            Horaires : {activity.openingHoursSummary}
+                          </p>
+                        )}
+
                         <p className="mt-3 text-xs text-slate-500">
                           Prix estimatif ou partenaire, à confirmer sur le site de
                           réservation.
                         </p>
                       </div>
 
-                      <div className="md:w-48 md:text-right">
+                      <div className="md:w-52 md:text-right">
                         <div className="text-2xl font-extrabold">
                           {formatSimpleEuro(total)}
                         </div>
@@ -989,12 +1018,24 @@ export default function ActivitiesPage() {
                         </button>
 
                         <a
-                          href={activity.link || activity.googleMapsUri || '#'}
+                          href={getYourGuideLink}
                           target="_blank"
-                          className="mt-2 block text-xs text-teal-700 underline"
+                          rel="noreferrer"
+                          className="mt-2 block rounded-xl border border-teal-200 px-4 py-2 text-center text-xs font-semibold text-teal-700 hover:bg-teal-50"
                         >
-                          Site / partenaire
+                          Réserver sur GetYourGuide
                         </a>
+
+                        {activity.googleMapsUri && (
+                          <a
+                            href={activity.googleMapsUri}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 block text-xs text-slate-500 underline"
+                          >
+                            Voir sur Google Maps
+                          </a>
+                        )}
                       </div>
                     </div>
                   </article>
@@ -1034,7 +1075,7 @@ export default function ActivitiesPage() {
 
               <div className="my-4 border-t border-slate-200" />
 
-              <div className="flex justify-between items-end gap-4">
+              <div className="flex items-end justify-between gap-4">
                 <span className="font-bold">Total actuel</span>
                 <span
                   className={`text-2xl font-extrabold ${
@@ -1075,7 +1116,9 @@ export default function ActivitiesPage() {
                       type="checkbox"
                       className="mt-0.5"
                       checked={acceptBudgetOverrun}
-                      onChange={(e) => setAcceptBudgetOverrun(e.target.checked)}
+                      onChange={(event) =>
+                        setAcceptBudgetOverrun(event.target.checked)
+                      }
                     />
                     <span>J’accepte de dépasser mon budget pour continuer.</span>
                   </label>
@@ -1089,7 +1132,7 @@ export default function ActivitiesPage() {
                 className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold ${
                   canContinue
                     ? 'bg-slate-900 text-white hover:bg-slate-800'
-                    : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                    : 'cursor-not-allowed bg-slate-200 text-slate-500'
                 }`}
               >
                 Continuer vers les restaurants

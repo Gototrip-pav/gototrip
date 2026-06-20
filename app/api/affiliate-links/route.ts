@@ -26,6 +26,10 @@ function getGetYourGuideAffiliateUrl() {
   return process.env.GETYOURGUIDE_AFFILIATE_URL || '';
 }
 
+function getGetYourGuideDeepLinkTemplate() {
+  return process.env.GETYOURGUIDE_DEEPLINK_TEMPLATE || '';
+}
+
 function buildBookingSearchUrl({
   city,
   country,
@@ -64,19 +68,14 @@ function buildBookingSearchUrl({
 }
 
 function attachDestinationToCjLink(cjAffiliateUrl: string, destinationUrl: string) {
-  if (!cjAffiliateUrl) {
-    return destinationUrl;
-  }
+  if (!cjAffiliateUrl) return destinationUrl;
 
   try {
     const cjUrl = new URL(cjAffiliateUrl);
-
     cjUrl.searchParams.set('url', destinationUrl);
-
     return cjUrl.toString();
   } catch {
     const separator = cjAffiliateUrl.includes('?') ? '&' : '?';
-
     return `${cjAffiliateUrl}${separator}url=${encodeURIComponent(destinationUrl)}`;
   }
 }
@@ -85,16 +84,11 @@ function buildBookingAffiliateUrl(payload: AffiliateLinkPayload) {
   const bookingDestinationUrl = buildBookingSearchUrl(payload);
   const cjAffiliateUrl = getBookingBaseAffiliateUrl();
 
-  const finalUrl = attachDestinationToCjLink(
-    cjAffiliateUrl,
-    bookingDestinationUrl
-  );
-
   return {
     provider: 'booking' as const,
     affiliateConfigured: Boolean(cjAffiliateUrl),
     destinationUrl: bookingDestinationUrl,
-    url: finalUrl,
+    url: attachDestinationToCjLink(cjAffiliateUrl, bookingDestinationUrl),
   };
 }
 
@@ -112,15 +106,57 @@ function buildGetYourGuideSearchUrl({ city, country }: AffiliateLinkPayload) {
   return getYourGuideUrl.toString();
 }
 
+function isShortFixedGetYourGuideLink(url: string) {
+  const cleanUrl = cleanValue(url).toLowerCase();
+
+  return cleanUrl.includes('gyg.me/');
+}
+
+function buildGetYourGuideDeepLink(destinationUrl: string) {
+  const template = getGetYourGuideDeepLinkTemplate();
+
+  if (!template) return '';
+
+  return template
+    .replaceAll('{url}', encodeURIComponent(destinationUrl))
+    .replaceAll('{destinationUrl}', encodeURIComponent(destinationUrl))
+    .replaceAll('{destination_url}', encodeURIComponent(destinationUrl));
+}
+
 function buildGetYourGuideAffiliateUrl(payload: AffiliateLinkPayload) {
-  const affiliateUrl = getGetYourGuideAffiliateUrl();
   const destinationUrl = buildGetYourGuideSearchUrl(payload);
+  const affiliateUrl = getGetYourGuideAffiliateUrl();
+  const deepLinkUrl = buildGetYourGuideDeepLink(destinationUrl);
+
+  if (deepLinkUrl) {
+    return {
+      provider: 'getyourguide' as const,
+      affiliateConfigured: true,
+      destinationUrl,
+      url: deepLinkUrl,
+      note: 'Lien GetYourGuide dynamique utilisé.',
+    };
+  }
+
+  if (affiliateUrl && !isShortFixedGetYourGuideLink(affiliateUrl)) {
+    return {
+      provider: 'getyourguide' as const,
+      affiliateConfigured: true,
+      destinationUrl,
+      url: affiliateUrl,
+      note: 'Lien affilié GetYourGuide utilisé.',
+    };
+  }
 
   return {
     provider: 'getyourguide' as const,
     affiliateConfigured: Boolean(affiliateUrl),
     destinationUrl,
-    url: affiliateUrl || destinationUrl,
+    url: destinationUrl,
+    note:
+      affiliateUrl && isShortFixedGetYourGuideLink(affiliateUrl)
+        ? 'Le lien court GetYourGuide est fixe. Gototrip ouvre donc la bonne recherche destination pour éviter de renvoyer vers Paris.'
+        : 'Aucun lien affilié GetYourGuide dynamique configuré. Gototrip ouvre la recherche destination.',
   };
 }
 
@@ -143,9 +179,7 @@ function normalizeProvider(value: string): AffiliateProvider | null {
 function buildAffiliateResult(payload: AffiliateLinkPayload) {
   const provider = normalizeProvider(payload.provider || 'booking');
 
-  if (!provider) {
-    return null;
-  }
+  if (!provider) return null;
 
   if (provider === 'booking') {
     return buildBookingAffiliateUrl(payload);
@@ -167,7 +201,6 @@ export async function GET(request: Request) {
   };
 
   const shouldRedirect = searchParams.get('redirect') === '1';
-
   const result = buildAffiliateResult(payload);
 
   if (!result) {
@@ -199,7 +232,6 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as AffiliateLinkPayload;
-
   const result = buildAffiliateResult(body);
 
   if (!result) {

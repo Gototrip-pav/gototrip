@@ -174,6 +174,13 @@ function normalizeText(value: string) {
     .replace(/\p{Diacritic}/gu, '');
 }
 
+function normalizePlaceName(value: string) {
+  return normalizeText(value)
+    .replace(/\b(hotel|hôtel|restaurant|cafe|café|bar|the|le|la|les|l'|de|du|des)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
 function pad(value: number) {
   return String(value).padStart(2, '0');
 }
@@ -229,6 +236,10 @@ function clampDuration(minutes: number, min = 30, max = 240) {
   if (!Number.isFinite(safe) || safe <= 0) return 90;
 
   return Math.min(max, Math.max(min, Math.round(safe)));
+}
+
+function hasValidPoint(point?: Point | null) {
+  return Number.isFinite(Number(point?.lat)) && Number.isFinite(Number(point?.lng));
 }
 
 function getPoint(place?: PlannerPlace | Point | null): Point | null {
@@ -288,6 +299,67 @@ export function calculateDistanceKm(
   return earthRadiusKm * c;
 }
 
+function placesAreSame(a?: PlannerPlace | null, b?: PlannerPlace | null) {
+  if (!a || !b) return false;
+
+  if (a.id && b.id && a.id === b.id) return true;
+
+  const nameA = normalizePlaceName(a.name || '');
+  const nameB = normalizePlaceName(b.name || '');
+
+  if (!nameA || !nameB) return false;
+
+  const sameName =
+    nameA === nameB ||
+    (nameA.length >= 5 && nameB.length >= 5 && (nameA.includes(nameB) || nameB.includes(nameA)));
+
+  if (!sameName) return false;
+
+  const addressA = normalizeText(a.address || '');
+  const addressB = normalizeText(b.address || '');
+
+  if (addressA && addressB && addressA === addressB) return true;
+
+  const pointA = getPoint(a);
+  const pointB = getPoint(b);
+
+  if (pointA && pointB) {
+    return calculateDistanceKm(pointA, pointB) < 0.2;
+  }
+
+  return true;
+}
+
+function dedupePlaces(places: PlannerPlace[]) {
+  const result: PlannerPlace[] = [];
+
+  places.forEach((place) => {
+    const alreadyExists = result.some((existingPlace) =>
+      placesAreSame(existingPlace, place)
+    );
+
+    if (!alreadyExists) {
+      result.push(place);
+    }
+  });
+
+  return result;
+}
+
+function filterOutMatchingPlaces(places: PlannerPlace[], blockers: PlannerPlace[]) {
+  return places.filter(
+    (place) => !blockers.some((blocker) => placesAreSame(place, blocker))
+  );
+}
+
+function removeMatchingPlacesFromPool(pool: PlannerPlace[], place: PlannerPlace) {
+  for (let index = pool.length - 1; index >= 0; index -= 1) {
+    if (placesAreSame(pool[index], place)) {
+      pool.splice(index, 1);
+    }
+  }
+}
+
 function getTravelSpeedKmh(transportId?: PlannerTransportId) {
   const normalized = normalizeText(String(transportId || ''));
 
@@ -306,15 +378,19 @@ export function estimateTravelMinutes(
   to?: { lat?: number; lng?: number } | null,
   transportId?: PlannerTransportId
 ) {
+  if (!hasValidPoint(from) || !hasValidPoint(to)) return 0;
+
   const distanceKm = calculateDistanceKm(from, to);
 
-  if (!distanceKm) return 15;
+  if (distanceKm < 0.05) return 0;
+  if (distanceKm < 0.25) return 4;
+  if (distanceKm < 0.75) return 8;
 
   const speedKmh = getTravelSpeedKmh(transportId);
   const pureTravel = (distanceKm / speedKmh) * 60;
-  const accessBuffer = distanceKm < 1 ? 6 : 10;
+  const accessBuffer = distanceKm < 1 ? 4 : 8;
 
-  return Math.max(8, Math.min(90, Math.round(pureTravel + accessBuffer)));
+  return Math.max(5, Math.min(90, Math.round(pureTravel + accessBuffer)));
 }
 
 export function estimatePlaceDuration(place: PlannerPlace, fallback = 90) {
@@ -664,14 +740,6 @@ function getInputTransportId(input: PlannerInput) {
   );
 }
 
-function removePlaceFromPool(pool: PlannerPlace[], place: PlannerPlace) {
-  const index = pool.findIndex((item) => item.id === place.id);
-
-  if (index >= 0) {
-    pool.splice(index, 1);
-  }
-}
-
 function scorePlaceCandidate({
   place,
   currentPoint,
@@ -919,11 +987,20 @@ function getNearestOrderedPlaces(
     if (!next) break;
 
     ordered.push(next.place);
-    removePlaceFromPool(remaining, next.place);
+    removeMatchingPlacesFromPool(remaining, next.place);
     currentPoint = getPoint(next.place) || currentPoint;
   }
 
   return ordered;
+}
+
+function removePickedEverywhere(
+  place: PlannerPlace,
+  activityPool: PlannerPlace[],
+  restaurantPool: PlannerPlace[]
+) {
+  removeMatchingPlacesFromPool(activityPool, place);
+  removeMatchingPlacesFromPool(restaurantPool, place);
 }
 
 function buildDay({
@@ -1003,7 +1080,7 @@ function buildDay({
       date,
     });
 
-    removePlaceFromPool(activityPool, picked.place);
+    removePickedEverywhere(picked.place, activityPool, restaurantPool);
     currentPoint = getPoint(picked.place) || currentPoint;
     cursor = picked.start + picked.duration + GAP_BETWEEN_STEPS;
     scheduledActivities += 1;
@@ -1035,7 +1112,7 @@ function buildDay({
       date,
     });
 
-    removePlaceFromPool(restaurantPool, lunchRestaurant.place);
+    removePickedEverywhere(lunchRestaurant.place, activityPool, restaurantPool);
     currentPoint = getPoint(lunchRestaurant.place) || currentPoint;
     cursor = lunchRestaurant.start + lunchRestaurant.duration + GAP_BETWEEN_STEPS;
   }
@@ -1072,7 +1149,7 @@ function buildDay({
       date,
     });
 
-    removePlaceFromPool(activityPool, picked.place);
+    removePickedEverywhere(picked.place, activityPool, restaurantPool);
     currentPoint = getPoint(picked.place) || currentPoint;
     cursor = picked.start + picked.duration + GAP_BETWEEN_STEPS;
     scheduledActivities += 1;
@@ -1104,7 +1181,7 @@ function buildDay({
       date,
     });
 
-    removePlaceFromPool(restaurantPool, dinnerRestaurant.place);
+    removePickedEverywhere(dinnerRestaurant.place, activityPool, restaurantPool);
     currentPoint = getPoint(dinnerRestaurant.place) || currentPoint;
     cursor = dinnerRestaurant.start + dinnerRestaurant.duration + GAP_BETWEEN_STEPS;
   }
@@ -1225,14 +1302,21 @@ export function optimizeTripPlanning(input: PlannerInput): OptimizedDay[] {
 
   const rawActivities = input.activities || input.selections?.activities || [];
   const rawRestaurants = input.restaurants || input.selections?.restaurants || [];
-  const stays = input.stays || input.selections?.stays || [];
+  const rawStays = input.stays || input.selections?.stays || [];
 
+  const stays = dedupePlaces(rawStays);
   const stay = stays[0] || null;
+
+  const restaurants = dedupePlaces(filterOutMatchingPlaces(rawRestaurants, stays));
+  const activities = dedupePlaces(
+    filterOutMatchingPlaces(rawActivities, [...stays, ...restaurants])
+  );
+
   const basePoint = getBasePoint(input, stay);
   const transportId = getInputTransportId(input);
 
-  const activityPool = getNearestOrderedPlaces(rawActivities, basePoint, transportId);
-  const restaurantPool = getNearestOrderedPlaces(rawRestaurants, basePoint, transportId);
+  const activityPool = getNearestOrderedPlaces(activities, basePoint, transportId);
+  const restaurantPool = getNearestOrderedPlaces(restaurants, basePoint, transportId);
 
   const days: OptimizedDay[] = [];
 

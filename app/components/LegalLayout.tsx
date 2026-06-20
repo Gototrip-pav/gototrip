@@ -7,12 +7,19 @@ type LegalLayoutProps = {
   children: ReactNode;
 };
 
-export default function LegalLayout({ title, subtitle, children }: LegalLayoutProps) {
+export default function LegalLayout({
+  title,
+  subtitle,
+  children,
+}: LegalLayoutProps) {
   return (
     <main className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-5">
-          <Link href="/" className="flex items-center gap-2 font-extrabold text-slate-900">
+          <Link
+            href="/"
+            className="flex items-center gap-2 font-extrabold text-slate-900"
+          >
             <span className="grid h-8 w-8 place-items-center rounded-full bg-teal-600 text-white">
               G
             </span>
@@ -43,16 +50,44 @@ export default function LegalLayout({ title, subtitle, children }: LegalLayoutPr
           {children}
         </article>
 
+        <aside className="mt-8 rounded-3xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+          <h2 className="mb-2 text-base font-bold text-amber-950">
+            Transparence sur les liens affiliés
+          </h2>
+
+          <p>
+            Certains liens de réservation présents sur Gototrip sont des liens
+            affiliés. Cela signifie que Gototrip peut percevoir une commission si
+            vous effectuez une réservation via ces liens, sans coût supplémentaire
+            pour vous.
+          </p>
+
+          <p className="mt-2">
+            Les prix, disponibilités, horaires, conditions de réservation et
+            conditions d’annulation doivent toujours être vérifiés directement sur
+            le site du partenaire concerné avant toute réservation.
+          </p>
+        </aside>
+
         <nav className="mt-8 flex flex-wrap gap-3 text-sm">
           <Link href="/mentions-legales" className="text-teal-700 underline">
             Mentions légales
           </Link>
-          <Link href="/politique-confidentialite" className="text-teal-700 underline">
+
+          <Link
+            href="/politique-confidentialite"
+            className="text-teal-700 underline"
+          >
             Politique de confidentialité
           </Link>
-          <Link href="/conditions-utilisation" className="text-teal-700 underline">
+
+          <Link
+            href="/conditions-utilisation"
+            className="text-teal-700 underline"
+          >
             Conditions d’utilisation
           </Link>
+
           <Link href="/contact" className="text-teal-700 underline">
             Contact
           </Link>

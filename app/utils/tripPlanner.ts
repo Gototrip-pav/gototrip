@@ -138,8 +138,34 @@ export type OptimizedDay = {
   warnings?: string[];
 };
 
+type Point = {
+  lat?: number;
+  lng?: number;
+};
+
+type PickedPlace = {
+  place: PlannerPlace;
+  start: number;
+  duration: number;
+  travelTimeMinutes: number;
+  travelDistanceKm: number;
+  openingStatus: 'open' | 'closed' | 'unknown';
+  score: number;
+};
+
 const DEFAULT_DAY_COUNT = 2;
 const DEFAULT_PERSONS = 1;
+
+const DAY_START = 9 * 60;
+const FIRST_DAY_START = 10 * 60 + 30;
+const LUNCH_START = 12 * 60 + 15;
+const LUNCH_END = 14 * 60;
+const AFTERNOON_START = 14 * 60 + 15;
+const DINNER_START = 20 * 60;
+const DINNER_END = 22 * 60;
+const DAY_END = 21 * 60 + 30;
+const FINAL_RETURN_START = 17 * 60;
+const GAP_BETWEEN_STEPS = 10;
 
 function normalizeText(value: string) {
   return String(value || '')
@@ -197,6 +223,37 @@ export function formatDurationLabel(minutes: number) {
   return `${hours}h${pad(remainingMinutes)}`;
 }
 
+function clampDuration(minutes: number, min = 30, max = 240) {
+  const safe = Number(minutes);
+
+  if (!Number.isFinite(safe) || safe <= 0) return 90;
+
+  return Math.min(max, Math.max(min, Math.round(safe)));
+}
+
+function getPoint(place?: PlannerPlace | Point | null): Point | null {
+  const lat = Number(place?.lat);
+  const lng = Number(place?.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  return { lat, lng };
+}
+
+function getBasePoint(input: PlannerInput, stay?: PlannerPlace | null): Point | null {
+  const stayPoint = getPoint(stay);
+
+  if (stayPoint) return stayPoint;
+
+  const destinationPoint = getPoint(input.destination);
+
+  if (destinationPoint) return destinationPoint;
+
+  return null;
+}
+
 export function calculateDistanceKm(
   a?: { lat?: number; lng?: number } | null,
   b?: { lat?: number; lng?: number } | null
@@ -231,19 +288,33 @@ export function calculateDistanceKm(
   return earthRadiusKm * c;
 }
 
+function getTravelSpeedKmh(transportId?: PlannerTransportId) {
+  const normalized = normalizeText(String(transportId || ''));
+
+  if (normalized.includes('walk') || normalized.includes('pied')) return 4.5;
+  if (normalized.includes('car') || normalized.includes('voiture')) return 28;
+  if (normalized.includes('rental')) return 28;
+  if (normalized.includes('bus')) return 18;
+  if (normalized.includes('train')) return 22;
+  if (normalized.includes('public')) return 18;
+
+  return 16;
+}
+
 export function estimateTravelMinutes(
   from?: { lat?: number; lng?: number } | null,
-  to?: { lat?: number; lng?: number } | null
+  to?: { lat?: number; lng?: number } | null,
+  transportId?: PlannerTransportId
 ) {
   const distanceKm = calculateDistanceKm(from, to);
 
   if (!distanceKm) return 15;
-  if (distanceKm < 1) return 10;
-  if (distanceKm < 3) return 15;
-  if (distanceKm < 6) return 25;
-  if (distanceKm < 12) return 35;
 
-  return Math.min(75, Math.round(distanceKm * 4));
+  const speedKmh = getTravelSpeedKmh(transportId);
+  const pureTravel = (distanceKm / speedKmh) * 60;
+  const accessBuffer = distanceKm < 1 ? 6 : 10;
+
+  return Math.max(8, Math.min(90, Math.round(pureTravel + accessBuffer)));
 }
 
 export function estimatePlaceDuration(place: PlannerPlace, fallback = 90) {
@@ -311,50 +382,155 @@ function getGoogleDay(date?: string) {
   return parsed.getDay();
 }
 
-function periodContainsMinutes(
-  period: PlannerOpeningPeriod,
-  googleDay: number,
-  minutes: number
-) {
-  const openDay = Number(period.openDay);
-  const closeDay = Number(period.closeDay);
-  const openMinutes = Number(period.openHour) * 60 + Number(period.openMinute || 0);
-  let closeMinutes = Number(period.closeHour) * 60 + Number(period.closeMinute || 0);
-
-  if (!Number.isFinite(openDay) || !Number.isFinite(closeDay)) return false;
-  if (!Number.isFinite(openMinutes) || !Number.isFinite(closeMinutes)) return false;
-
-  if (openDay === closeDay) {
-    return googleDay === openDay && minutes >= openMinutes && minutes <= closeMinutes;
-  }
-
-  if (googleDay === openDay) {
-    return minutes >= openMinutes;
-  }
-
-  if (googleDay === closeDay) {
-    return minutes <= closeMinutes;
-  }
-
-  return false;
+function nextGoogleDay(day: number) {
+  return (day + 1) % 7;
 }
 
-export function isPlaceOpenAt(place: PlannerPlace, date: string | undefined, time: string) {
+function isDayInsideSpan(openDay: number, closeDay: number, day: number) {
+  if (openDay === closeDay) return day === openDay;
+
+  if (openDay < closeDay) {
+    return day > openDay && day < closeDay;
+  }
+
+  return day > openDay || day < closeDay;
+}
+
+function getOpeningIntervalsForDay(place: PlannerPlace, date?: string) {
   const periods = place.openingPeriods || [];
 
-  if (!periods.length) return 'unknown';
+  if (!periods.length) return null;
 
   const googleDay = getGoogleDay(date);
 
-  if (googleDay === null) return 'unknown';
+  if (googleDay === null) return null;
+
+  const intervals: { start: number; end: number }[] = [];
+
+  periods.forEach((period) => {
+    const openDay = Number(period.openDay);
+    const closeDay = Number(period.closeDay);
+    const openMinutes = Number(period.openHour) * 60 + Number(period.openMinute || 0);
+    const closeMinutes =
+      Number(period.closeHour) * 60 + Number(period.closeMinute || 0);
+
+    if (!Number.isFinite(openDay) || !Number.isFinite(closeDay)) return;
+    if (!Number.isFinite(openMinutes) || !Number.isFinite(closeMinutes)) return;
+
+    if (openDay === closeDay) {
+      if (googleDay !== openDay) return;
+
+      if (closeMinutes <= openMinutes) {
+        intervals.push({ start: openMinutes, end: 24 * 60 });
+        return;
+      }
+
+      intervals.push({ start: openMinutes, end: closeMinutes });
+      return;
+    }
+
+    if (googleDay === openDay) {
+      intervals.push({ start: openMinutes, end: 24 * 60 });
+      return;
+    }
+
+    if (googleDay === closeDay) {
+      intervals.push({ start: 0, end: closeMinutes });
+      return;
+    }
+
+    if (isDayInsideSpan(openDay, closeDay, googleDay)) {
+      intervals.push({ start: 0, end: 24 * 60 });
+      return;
+    }
+
+    if (nextGoogleDay(openDay) === googleDay && closeMinutes <= openMinutes) {
+      intervals.push({ start: 0, end: closeMinutes });
+    }
+  });
+
+  return intervals.sort((a, b) => a.start - b.start);
+}
+
+function isRangeInsideInterval(
+  interval: { start: number; end: number },
+  start: number,
+  duration: number
+) {
+  const end = start + duration;
+
+  return start >= interval.start && end <= interval.end;
+}
+
+export function isPlaceOpenAt(place: PlannerPlace, date: string | undefined, time: string) {
+  const intervals = getOpeningIntervalsForDay(place, date);
+
+  if (!intervals) return 'unknown';
 
   const minutes = timeToMinutes(time);
 
-  const open = periods.some((period) =>
-    periodContainsMinutes(period, googleDay, minutes)
+  const open = intervals.some(
+    (interval) => minutes >= interval.start && minutes <= interval.end
   );
 
   return open ? 'open' : 'closed';
+}
+
+function isPlaceOpenDuring(
+  place: PlannerPlace,
+  date: string | undefined,
+  startMinutes: number,
+  durationMinutes: number
+): 'open' | 'closed' | 'unknown' {
+  const intervals = getOpeningIntervalsForDay(place, date);
+
+  if (!intervals) return 'unknown';
+
+  const open = intervals.some((interval) =>
+    isRangeInsideInterval(interval, startMinutes, durationMinutes)
+  );
+
+  return open ? 'open' : 'closed';
+}
+
+function findAvailableStartForPlace({
+  place,
+  date,
+  earliestStart,
+  duration,
+  latestEnd,
+}: {
+  place: PlannerPlace;
+  date?: string;
+  earliestStart: number;
+  duration: number;
+  latestEnd: number;
+}) {
+  const intervals = getOpeningIntervalsForDay(place, date);
+
+  if (!intervals) return earliestStart;
+
+  for (const interval of intervals) {
+    const candidateStart = Math.max(earliestStart, interval.start);
+
+    if (candidateStart + duration <= interval.end && candidateStart + duration <= latestEnd) {
+      return candidateStart;
+    }
+  }
+
+  return null;
+}
+
+function getCloseMinuteForStart(place: PlannerPlace, date: string | undefined, start: number) {
+  const intervals = getOpeningIntervalsForDay(place, date);
+
+  if (!intervals) return null;
+
+  const interval = intervals.find(
+    (item) => start >= item.start && start <= item.end
+  );
+
+  return interval?.end ?? null;
 }
 
 function makeEditableId(day: number, index: number, prefix: string) {
@@ -373,6 +549,8 @@ function createSlot({
   date,
   role,
   locked = false,
+  travelTimeMinutes = 0,
+  travelDistanceKm = 0,
 }: {
   day: number;
   index: number;
@@ -385,11 +563,25 @@ function createSlot({
   date?: string;
   role?: string;
   locked?: boolean;
+  travelTimeMinutes?: number;
+  travelDistanceKm?: number;
 }): PlanningSlot {
   const startTime = minutesToTime(start);
   const endTime = minutesToTime(start + duration);
-  const openingStatus = place ? isPlaceOpenAt(place, date, startTime) : 'unknown';
+  const openingStatus = place
+    ? isPlaceOpenDuring(place, date, start, duration)
+    : 'unknown';
+
   const price = place ? getPrice(place, persons) : 0;
+
+  const travelText =
+    travelTimeMinutes > 0
+      ? `Trajet estimé depuis l’étape précédente : ${travelTimeMinutes} min${
+          travelDistanceKm > 0 ? ` • ${travelDistanceKm.toFixed(1)} km` : ''
+        }.`
+      : '';
+
+  const descriptionParts = [place?.description || '', travelText].filter(Boolean);
 
   return {
     id: `${day}-${type}-${index}`,
@@ -399,12 +591,14 @@ function createSlot({
     endTime,
     title,
     subtitle: place?.address || '',
-    description: place?.description || '',
+    description: descriptionParts.join('\n'),
     type,
     place: place || null,
     price,
     pricePerPerson: place?.pricePerPerson,
     totalPrice: price,
+    travelTimeMinutes,
+    travelDistanceKm,
     durationMinutes: duration,
     durationLabel: formatDurationLabel(duration),
     openingStatus,
@@ -429,17 +623,6 @@ function createSlot({
     movable: !locked,
     role,
   };
-}
-
-function splitByDay<T>(items: T[], dayCount: number) {
-  const safeDayCount = Math.max(1, dayCount);
-  const result: T[][] = Array.from({ length: safeDayCount }, () => []);
-
-  items.forEach((item, index) => {
-    result[index % safeDayCount].push(item);
-  });
-
-  return result;
 }
 
 function getTransportLabel(input: PlannerInput) {
@@ -472,29 +655,308 @@ function getTransportLabel(input: PlannerInput) {
   return 'point de transport';
 }
 
+function getInputTransportId(input: PlannerInput) {
+  return (
+    input.transportId ||
+    input.transport?.id ||
+    input.transport?.mode ||
+    'unknown'
+  );
+}
+
+function removePlaceFromPool(pool: PlannerPlace[], place: PlannerPlace) {
+  const index = pool.findIndex((item) => item.id === place.id);
+
+  if (index >= 0) {
+    pool.splice(index, 1);
+  }
+}
+
+function scorePlaceCandidate({
+  place,
+  currentPoint,
+  earliestStart,
+  preferredStart,
+  latestEnd,
+  date,
+  duration,
+  transportId,
+  closedPenalty,
+}: {
+  place: PlannerPlace;
+  currentPoint: Point | null;
+  earliestStart: number;
+  preferredStart?: number;
+  latestEnd: number;
+  date?: string;
+  duration: number;
+  transportId?: PlannerTransportId;
+  closedPenalty: number;
+}): PickedPlace | null {
+  const placePoint = getPoint(place);
+  const distanceKm = calculateDistanceKm(currentPoint, placePoint);
+  const travelTimeMinutes = estimateTravelMinutes(currentPoint, placePoint, transportId);
+
+  const arrivalStart = Math.max(
+    earliestStart + travelTimeMinutes,
+    preferredStart || 0
+  );
+
+  const availableStart = findAvailableStartForPlace({
+    place,
+    date,
+    earliestStart: arrivalStart,
+    duration,
+    latestEnd,
+  });
+
+  let start = availableStart;
+  let openingStatus: 'open' | 'closed' | 'unknown' = 'unknown';
+  let penalty = 0;
+
+  if (start === null) {
+    if (arrivalStart + duration > latestEnd) {
+      return null;
+    }
+
+    start = arrivalStart;
+    openingStatus = isPlaceOpenDuring(place, date, start, duration);
+    penalty = closedPenalty;
+  } else {
+    openingStatus = isPlaceOpenDuring(place, date, start, duration);
+  }
+
+  if (start + duration > latestEnd) {
+    return null;
+  }
+
+  const waitTime = Math.max(0, start - (earliestStart + travelTimeMinutes));
+  const closeMinute = getCloseMinuteForStart(place, date, start);
+
+  const closesEarlyBonus =
+    closeMinute !== null && closeMinute < 17 * 60
+      ? Math.max(0, (17 * 60 - closeMinute) / 10)
+      : 0;
+
+  const score =
+    travelTimeMinutes * 1.25 +
+    distanceKm * 2.5 +
+    waitTime * 0.45 +
+    penalty -
+    closesEarlyBonus;
+
+  return {
+    place,
+    start,
+    duration,
+    travelTimeMinutes,
+    travelDistanceKm: distanceKm,
+    openingStatus,
+    score,
+  };
+}
+
+function pickBestPlace({
+  pool,
+  currentPoint,
+  earliestStart,
+  preferredStart,
+  latestEnd,
+  date,
+  transportId,
+  fallbackDuration,
+  maxDuration,
+  closedPenalty = 500,
+}: {
+  pool: PlannerPlace[];
+  currentPoint: Point | null;
+  earliestStart: number;
+  preferredStart?: number;
+  latestEnd: number;
+  date?: string;
+  transportId?: PlannerTransportId;
+  fallbackDuration: number;
+  maxDuration: number;
+  closedPenalty?: number;
+}): PickedPlace | null {
+  const candidates = pool
+    .map((place) => {
+      const duration = clampDuration(
+        estimatePlaceDuration(place, fallbackDuration),
+        30,
+        maxDuration
+      );
+
+      return scorePlaceCandidate({
+        place,
+        currentPoint,
+        earliestStart,
+        preferredStart,
+        latestEnd,
+        date,
+        duration,
+        transportId,
+        closedPenalty,
+      });
+    })
+    .filter(Boolean) as PickedPlace[];
+
+  if (!candidates.length) return null;
+
+  const openCandidates = candidates.filter(
+    (candidate) => candidate.openingStatus === 'open'
+  );
+
+  const unknownCandidates = candidates.filter(
+    (candidate) => candidate.openingStatus === 'unknown'
+  );
+
+  const poolToUse =
+    openCandidates.length > 0
+      ? openCandidates
+      : unknownCandidates.length > 0
+        ? unknownCandidates
+        : candidates;
+
+  return poolToUse.sort((a, b) => a.score - b.score)[0] || null;
+}
+
+function createInfoSlot({
+  day,
+  index,
+  start,
+  duration,
+  title,
+  description,
+}: {
+  day: number;
+  index: number;
+  start: number;
+  duration: number;
+  title: string;
+  description: string;
+}): PlanningSlot {
+  return {
+    id: `${day}-info-${index}`,
+    editableId: makeEditableId(day, index, 'info'),
+    time: formatTimeRange(start, duration),
+    startTime: minutesToTime(start),
+    endTime: minutesToTime(start + duration),
+    title,
+    subtitle: '',
+    description,
+    type: 'info',
+    price: 0,
+    totalPrice: 0,
+    durationMinutes: duration,
+    durationLabel: formatDurationLabel(duration),
+    openingStatus: 'unknown',
+    warning: null,
+    locked: false,
+    editable: true,
+    removable: true,
+    movable: true,
+  };
+}
+
+function addPickedSlot({
+  slots,
+  picked,
+  day,
+  index,
+  type,
+  persons,
+  date,
+}: {
+  slots: PlanningSlot[];
+  picked: PickedPlace;
+  day: number;
+  index: number;
+  type: PlanningSlotType;
+  persons: number;
+  date?: string;
+}) {
+  slots.push(
+    createSlot({
+      day,
+      index,
+      start: picked.start,
+      duration: picked.duration,
+      title: picked.place.name,
+      type,
+      place: picked.place,
+      persons,
+      date,
+      travelTimeMinutes: picked.travelTimeMinutes,
+      travelDistanceKm: picked.travelDistanceKm,
+    })
+  );
+}
+
+function getNearestOrderedPlaces(
+  places: PlannerPlace[],
+  startPoint: Point | null,
+  transportId?: PlannerTransportId
+) {
+  const remaining = [...places];
+  const ordered: PlannerPlace[] = [];
+  let currentPoint = startPoint;
+
+  while (remaining.length > 0) {
+    const next = remaining
+      .map((place) => {
+        const point = getPoint(place);
+        const distance = calculateDistanceKm(currentPoint, point);
+        const travel = estimateTravelMinutes(currentPoint, point, transportId);
+
+        return {
+          place,
+          score: travel + distance * 2,
+        };
+      })
+      .sort((a, b) => a.score - b.score)[0];
+
+    if (!next) break;
+
+    ordered.push(next.place);
+    removePlaceFromPool(remaining, next.place);
+    currentPoint = getPoint(next.place) || currentPoint;
+  }
+
+  return ordered;
+}
+
 function buildDay({
   input,
   day,
   dayIndex,
   date,
-  activities,
-  restaurants,
+  activityPool,
+  restaurantPool,
   stay,
+  maxActivitiesForDay,
 }: {
   input: PlannerInput;
   day: number;
   dayIndex: number;
   date?: string;
-  activities: PlannerPlace[];
-  restaurants: PlannerPlace[];
+  activityPool: PlannerPlace[];
+  restaurantPool: PlannerPlace[];
   stay?: PlannerPlace | null;
+  maxActivitiesForDay: number;
 }) {
   const persons = input.persons || DEFAULT_PERSONS;
   const dayCount = input.duration || input.days || DEFAULT_DAY_COUNT;
+  const transportId = getInputTransportId(input);
   const transportLabel = getTransportLabel(input);
+  const basePoint = getBasePoint(input, stay);
+
   const slots: PlanningSlot[] = [];
 
   let index = 0;
+  let currentPoint = basePoint;
+  let cursor = dayIndex === 0 ? FIRST_DAY_START : DAY_START;
+  let scheduledActivities = 0;
 
   if (dayIndex === 0) {
     slots.push(
@@ -513,94 +975,151 @@ function buildDay({
     );
   }
 
-  const morningStart = dayIndex === 0 ? 10 * 60 + 30 : 9 * 60;
-  const lunchStart = 12 * 60 + 15;
-  const afternoonStart = 14 * 60 + 15;
-  const dinnerStart = 20 * 60;
+  while (
+    activityPool.length > 0 &&
+    scheduledActivities < Math.max(1, Math.ceil(maxActivitiesForDay / 2)) &&
+    cursor < LUNCH_START - 30
+  ) {
+    const picked = pickBestPlace({
+      pool: activityPool,
+      currentPoint,
+      earliestStart: cursor,
+      latestEnd: LUNCH_START - 15,
+      date,
+      transportId,
+      fallbackDuration: 90,
+      maxDuration: 150,
+    });
 
-  const morningActivity = activities[0];
-  const afternoonActivity = activities[1] || activities[0];
-  const lunchRestaurant = restaurants[0];
-  const dinnerRestaurant = restaurants[1] || restaurants[0];
+    if (!picked) break;
 
-  if (morningActivity) {
-    const duration = Math.min(150, estimatePlaceDuration(morningActivity, 90));
+    addPickedSlot({
+      slots,
+      picked,
+      day,
+      index: index++,
+      type: 'activity',
+      persons,
+      date,
+    });
 
-    slots.push(
-      createSlot({
-        day,
-        index: index++,
-        start: morningStart,
-        duration,
-        title: morningActivity.name,
-        type: 'activity',
-        place: morningActivity,
-        persons,
-        date,
-      })
-    );
+    removePlaceFromPool(activityPool, picked.place);
+    currentPoint = getPoint(picked.place) || currentPoint;
+    cursor = picked.start + picked.duration + GAP_BETWEEN_STEPS;
+    scheduledActivities += 1;
   }
+
+  const lunchRestaurant = restaurantPool.length
+    ? pickBestPlace({
+        pool: restaurantPool,
+        currentPoint,
+        earliestStart: cursor,
+        preferredStart: LUNCH_START,
+        latestEnd: LUNCH_END,
+        date,
+        transportId,
+        fallbackDuration: 90,
+        maxDuration: 120,
+        closedPenalty: 700,
+      })
+    : null;
 
   if (lunchRestaurant) {
-    const duration = Math.min(120, estimatePlaceDuration(lunchRestaurant, 90));
+    addPickedSlot({
+      slots,
+      picked: lunchRestaurant,
+      day,
+      index: index++,
+      type: 'restaurant',
+      persons,
+      date,
+    });
 
-    slots.push(
-      createSlot({
-        day,
-        index: index++,
-        start: lunchStart,
-        duration,
-        title: lunchRestaurant.name,
-        type: 'restaurant',
-        place: lunchRestaurant,
-        persons,
-        date,
-      })
-    );
+    removePlaceFromPool(restaurantPool, lunchRestaurant.place);
+    currentPoint = getPoint(lunchRestaurant.place) || currentPoint;
+    cursor = lunchRestaurant.start + lunchRestaurant.duration + GAP_BETWEEN_STEPS;
   }
 
-  if (afternoonActivity && afternoonActivity.id !== morningActivity?.id) {
-    const duration = Math.min(180, estimatePlaceDuration(afternoonActivity, 90));
+  cursor = Math.max(cursor, AFTERNOON_START);
 
-    slots.push(
-      createSlot({
-        day,
-        index: index++,
-        start: afternoonStart,
-        duration,
-        title: afternoonActivity.name,
-        type: 'activity',
-        place: afternoonActivity,
-        persons,
-        date,
-      })
-    );
+  while (
+    activityPool.length > 0 &&
+    scheduledActivities < maxActivitiesForDay &&
+    cursor < DAY_END - 45
+  ) {
+    const latestEnd = restaurantPool.length > 0 ? DINNER_START - 30 : DAY_END;
+
+    const picked = pickBestPlace({
+      pool: activityPool,
+      currentPoint,
+      earliestStart: cursor,
+      latestEnd,
+      date,
+      transportId,
+      fallbackDuration: 90,
+      maxDuration: 180,
+    });
+
+    if (!picked) break;
+
+    addPickedSlot({
+      slots,
+      picked,
+      day,
+      index: index++,
+      type: 'activity',
+      persons,
+      date,
+    });
+
+    removePlaceFromPool(activityPool, picked.place);
+    currentPoint = getPoint(picked.place) || currentPoint;
+    cursor = picked.start + picked.duration + GAP_BETWEEN_STEPS;
+    scheduledActivities += 1;
   }
 
-  if (dinnerRestaurant && dinnerRestaurant.id !== lunchRestaurant?.id) {
-    const duration = Math.min(120, estimatePlaceDuration(dinnerRestaurant, 90));
-
-    slots.push(
-      createSlot({
-        day,
-        index: index++,
-        start: dinnerStart,
-        duration,
-        title: dinnerRestaurant.name,
-        type: 'restaurant',
-        place: dinnerRestaurant,
-        persons,
+  const dinnerRestaurant = restaurantPool.length
+    ? pickBestPlace({
+        pool: restaurantPool,
+        currentPoint,
+        earliestStart: cursor,
+        preferredStart: DINNER_START,
+        latestEnd: DINNER_END,
         date,
+        transportId,
+        fallbackDuration: 90,
+        maxDuration: 120,
+        closedPenalty: 700,
       })
-    );
+    : null;
+
+  if (dinnerRestaurant) {
+    addPickedSlot({
+      slots,
+      picked: dinnerRestaurant,
+      day,
+      index: index++,
+      type: 'restaurant',
+      persons,
+      date,
+    });
+
+    removePlaceFromPool(restaurantPool, dinnerRestaurant.place);
+    currentPoint = getPoint(dinnerRestaurant.place) || currentPoint;
+    cursor = dinnerRestaurant.start + dinnerRestaurant.duration + GAP_BETWEEN_STEPS;
   }
 
   if (stay && dayIndex < dayCount - 1) {
+    const stayPoint = getPoint(stay);
+    const travelDistanceKm = calculateDistanceKm(currentPoint, stayPoint);
+    const travelTimeMinutes = estimateTravelMinutes(currentPoint, stayPoint, transportId);
+    const returnStart = Math.max(cursor + travelTimeMinutes, 18 * 60);
+
     slots.push(
       createSlot({
         day,
         index: index++,
-        start: 21 * 60 + 45,
+        start: returnStart,
         duration: 30,
         title: `Retour à l’hébergement : ${stay.name}`,
         type: 'return-base',
@@ -609,16 +1128,31 @@ function buildDay({
         date,
         role: 'return-base',
         locked: true,
+        travelTimeMinutes,
+        travelDistanceKm,
       })
     );
+
+    currentPoint = stayPoint || currentPoint;
+    cursor = returnStart + 30;
   }
 
   if (dayIndex === dayCount - 1) {
+    const destinationPoint = getPoint(input.destination);
+    const travelDistanceKm = calculateDistanceKm(currentPoint, destinationPoint);
+    const travelTimeMinutes = estimateTravelMinutes(
+      currentPoint,
+      destinationPoint,
+      transportId
+    );
+
+    const returnStart = Math.max(cursor + travelTimeMinutes, FINAL_RETURN_START);
+
     slots.push(
       createSlot({
         day,
         index: index++,
-        start: 17 * 60,
+        start: returnStart,
         duration: 60,
         title: `Retour vers ${transportLabel}`,
         type: 'return-trip',
@@ -626,17 +1160,46 @@ function buildDay({
         date,
         role: 'return-trip',
         locked: true,
+        travelTimeMinutes,
+        travelDistanceKm,
       })
     );
   }
 
-  const totalCost = slots.reduce((sum, slot) => sum + Number(slot.price || 0), 0);
-  const totalDurationMinutes = slots.reduce(
+  if (slots.length <= (dayIndex === 0 ? 2 : 1)) {
+    slots.push(
+      createInfoSlot({
+        day,
+        index: index++,
+        start: 11 * 60,
+        duration: 90,
+        title: 'Temps libre',
+        description:
+          'Aucune activité supplémentaire n’a pu être placée proprement sur ce créneau. Vous pouvez ajouter manuellement du temps libre ou ajuster le planning.',
+      })
+    );
+  }
+
+  const sortedSlots = [...slots].sort(
+    (a, b) => timeToMinutes(a.startTime || '00:00') - timeToMinutes(b.startTime || '00:00')
+  );
+
+  const totalCost = sortedSlots.reduce(
+    (sum, slot) => sum + Number(slot.price || 0),
+    0
+  );
+
+  const totalDurationMinutes = sortedSlots.reduce(
     (sum, slot) => sum + Number(slot.durationMinutes || 0),
     0
   );
 
-  const warnings = slots
+  const totalTravelMinutes = sortedSlots.reduce(
+    (sum, slot) => sum + Number(slot.travelTimeMinutes || 0),
+    0
+  );
+
+  const warnings = sortedSlots
     .filter((slot) => slot.warning || slot.openingWarning)
     .map((slot) => String(slot.warning || slot.openingWarning));
 
@@ -644,8 +1207,8 @@ function buildDay({
     day,
     date,
     title: `Jour ${day}`,
-    summary: `${slots.length} étape(s) prévue(s)`,
-    slots,
+    summary: `${sortedSlots.length} étape(s) optimisée(s) • trajets estimés ${totalTravelMinutes} min`,
+    slots: sortedSlots,
     totalCost,
     totalDurationMinutes,
     warnings,
@@ -660,28 +1223,44 @@ export function optimizeTripPlanning(input: PlannerInput): OptimizedDay[] {
 
   const startDate = input.startDate || input.start || undefined;
 
-  const activities = input.activities || input.selections?.activities || [];
-  const restaurants = input.restaurants || input.selections?.restaurants || [];
+  const rawActivities = input.activities || input.selections?.activities || [];
+  const rawRestaurants = input.restaurants || input.selections?.restaurants || [];
   const stays = input.stays || input.selections?.stays || [];
 
-  const activitiesByDay = splitByDay(activities, dayCount);
-  const restaurantsByDay = splitByDay(restaurants, dayCount);
   const stay = stays[0] || null;
+  const basePoint = getBasePoint(input, stay);
+  const transportId = getInputTransportId(input);
 
-  return Array.from({ length: dayCount }, (_, index) => {
+  const activityPool = getNearestOrderedPlaces(rawActivities, basePoint, transportId);
+  const restaurantPool = getNearestOrderedPlaces(rawRestaurants, basePoint, transportId);
+
+  const days: OptimizedDay[] = [];
+
+  for (let index = 0; index < dayCount; index += 1) {
+    const remainingDays = Math.max(1, dayCount - index);
+    const maxActivitiesForDay = Math.max(
+      1,
+      Math.ceil(activityPool.length / remainingDays)
+    );
+
     const day = index + 1;
     const date = getDateForDay(startDate, index);
 
-    return buildDay({
-      input,
-      day,
-      dayIndex: index,
-      date,
-      activities: activitiesByDay[index] || [],
-      restaurants: restaurantsByDay[index] || [],
-      stay,
-    });
-  });
+    days.push(
+      buildDay({
+        input,
+        day,
+        dayIndex: index,
+        date,
+        activityPool,
+        restaurantPool,
+        stay,
+        maxActivitiesForDay,
+      })
+    );
+  }
+
+  return days;
 }
 
 export function generateOptimizedPlanning(input: PlannerInput) {

@@ -16,6 +16,7 @@ import {
   Wallet,
   Info,
   BedDouble,
+  House,
 } from 'lucide-react';
 import TripMap from '../../components/TripMap';
 
@@ -61,6 +62,7 @@ type TripSelection = {
   startDate?: string | null;
   budget?: number | null;
   lodging?: string;
+  lodgings?: string[];
   selections?: {
     activities?: any[];
     restaurants?: any[];
@@ -105,7 +107,13 @@ const STAY_FILTERS: StayFilter[] = [
     id: 'apartment',
     label: 'Appartement',
     icon: <Building2 className="h-4 w-4" />,
-    keywords: ['apartment', 'appartement', 'residence'],
+    keywords: ['apartment', 'appartement', 'residence', 'serviced apartment'],
+  },
+  {
+    id: 'house',
+    label: 'Maison / villa',
+    icon: <House className="h-4 w-4" />,
+    keywords: ['house', 'maison', 'villa', 'holiday home', 'vacation rental'],
   },
   {
     id: 'luxury',
@@ -156,7 +164,10 @@ function getStayHaystack(stay: Stay) {
 function stayMatchesFilters(stay: Stay, filters: string[]) {
   if (filters.length === 0) return true;
 
-  const selectedFilters = STAY_FILTERS.filter((filter) => filters.includes(filter.id));
+  const selectedFilters = STAY_FILTERS.filter((filter) =>
+    filters.includes(filter.id)
+  );
+
   const haystack = getStayHaystack(stay);
 
   return selectedFilters.some((filter) =>
@@ -213,20 +224,35 @@ function generateStayDescription(stay: Stay, activeFilters: string[]) {
     return `Une option pratique pour avoir plus d’autonomie pendant le séjour, notamment à plusieurs.${ratingText}`;
   }
 
+  if (
+    haystack.includes('house') ||
+    haystack.includes('maison') ||
+    haystack.includes('villa')
+  ) {
+    return `Une option intéressante pour profiter d’un logement plus indépendant, pratique en famille ou en groupe.${ratingText}`;
+  }
+
   if (activeFilters.includes('budget')) {
     return `Une option pensée pour limiter le budget hébergement tout en restant cohérente avec le séjour.${ratingText}`;
   }
 
-  return `Hébergement proposé selon vos critères. Les disponibilités et tarifs exacts seront à confirmer sur le site partenaire.${ratingText}`;
+  return `Hébergement proposé selon vos critères. Les disponibilités et tarifs exacts seront à confirmer sur Booking ou le site partenaire.${ratingText}`;
 }
 
 function buildApiLodgingFilter(activeFilters: string[], trip?: TripSelection | null) {
   if (activeFilters.includes('camping')) return 'camping';
   if (activeFilters.includes('hostel')) return 'auberge';
   if (activeFilters.includes('apartment')) return 'appartement';
+  if (activeFilters.includes('house')) return 'maison';
   if (activeFilters.includes('luxury')) return 'luxueux';
   if (activeFilters.includes('budget')) return 'auberge';
-  if (trip?.lodging) return trip.lodging;
+
+  const firstTripLodging = String(trip?.lodging || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)[0];
+
+  if (firstTripLodging) return firstTripLodging;
 
   return 'hotel';
 }
@@ -247,7 +273,9 @@ function normalizeStay(raw: any): Stay {
     userRatingCount: raw.userRatingCount || 0,
     pricePerNightPerPerson: Number.isFinite(rawPrice) ? rawPrice : 80,
     priceTotal:
-      typeof raw.priceTotal === 'number' ? raw.priceTotal : Number(raw.priceTotal || 0),
+      typeof raw.priceTotal === 'number'
+        ? raw.priceTotal
+        : Number(raw.priceTotal || 0),
     currency: raw.currency || 'EUR',
     link: raw.link || raw.googleMapsUri || '#',
     googleMapsUri: raw.googleMapsUri || '',
@@ -275,6 +303,67 @@ function getCheckoutDate(start: string | null | undefined, nights: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function parseInitialStayFilters(trip: TripSelection | null) {
+  if (!trip) return [];
+
+  const rawValues = [
+    ...(Array.isArray(trip.lodgings) ? trip.lodgings : []),
+    ...String(trip.lodging || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ];
+
+  const mapped = rawValues
+    .map((value) => {
+      const normalized = normalizeText(value);
+
+      if (normalized === 'hotel') return 'hotel';
+      if (normalized === 'auberge' || normalized === 'hostel') return 'hostel';
+      if (normalized === 'camping') return 'camping';
+      if (normalized === 'appartement' || normalized === 'apartment') {
+        return 'apartment';
+      }
+      if (
+        normalized === 'maison' ||
+        normalized === 'house' ||
+        normalized === 'villa'
+      ) {
+        return 'house';
+      }
+
+      return '';
+    })
+    .filter(Boolean);
+
+  return Array.from(new Set(mapped));
+}
+
+function buildBookingAffiliatePath(trip: TripSelection | null) {
+  if (!trip?.destination) return '#';
+
+  const checkin = trip.startDate || trip.start || '';
+  const checkout = getCheckoutDate(checkin, trip.nights || 1);
+
+  const params = new URLSearchParams({
+    provider: 'booking',
+    city: trip.destination.city || '',
+    country: trip.destination.country || '',
+    persons: String(trip.persons || 1),
+    redirect: '1',
+  });
+
+  if (checkin) {
+    params.set('checkin', checkin);
+  }
+
+  if (checkout) {
+    params.set('checkout', checkout);
+  }
+
+  return `/api/affiliate-links?${params.toString()}`;
+}
+
 export default function StaysPage() {
   const router = useRouter();
 
@@ -285,7 +374,6 @@ export default function StaysPage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [sourceWarning, setSourceWarning] = useState('');
 
   const [budget, setBudget] = useState<number | null>(null);
   const [acceptBudgetOverrun, setAcceptBudgetOverrun] = useState(false);
@@ -321,12 +409,15 @@ export default function StaysPage() {
     if (rawFilters) {
       try {
         const parsedFilters = JSON.parse(rawFilters);
+
         if (Array.isArray(parsedFilters.filters)) {
           setActiveFilters(parsedFilters.filters);
         }
       } catch {
-        setActiveFilters([]);
+        setActiveFilters(parseInitialStayFilters(parsedSelection));
       }
+    } else {
+      setActiveFilters(parseInitialStayFilters(parsedSelection));
     }
 
     if (typeof parsedSelection.budget === 'number' && parsedSelection.budget > 0) {
@@ -352,7 +443,6 @@ export default function StaysPage() {
       try {
         setLoading(true);
         setError('');
-        setSourceWarning('');
 
         const checkin = trip.startDate || trip.start || '';
         const checkout = getCheckoutDate(checkin, trip.nights);
@@ -392,10 +482,6 @@ export default function StaysPage() {
           throw new Error(message);
         }
 
-        if (json.warning) {
-          setSourceWarning(json.warning);
-        }
-
         const rawStays = Array.isArray(json.stays)
           ? json.stays
           : Array.isArray(json.places)
@@ -426,6 +512,7 @@ export default function StaysPage() {
 
   const persons = trip?.persons || 1;
   const nights = trip?.nights || 1;
+  const bookingAffiliatePath = buildBookingAffiliatePath(trip);
 
   const staysTotal = useMemo(() => {
     if (!selectedStay) return 0;
@@ -472,6 +559,7 @@ export default function StaysPage() {
 
       return {
         ...stay,
+        link: bookingAffiliatePath,
         description: stay.description || generateStayDescription(stay, activeFilters),
       };
     });
@@ -584,6 +672,10 @@ export default function StaysPage() {
         <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
           <h2 className="mb-4 text-xl font-bold">Type d’hébergement</h2>
 
+          <p className="mb-3 text-xs text-slate-500">
+            Vous pouvez sélectionner plusieurs types pour élargir les résultats.
+          </p>
+
           <div className="flex flex-wrap gap-2">
             {STAY_FILTERS.map((filter) => {
               const active = activeFilters.includes(filter.id);
@@ -607,8 +699,8 @@ export default function StaysPage() {
           </div>
 
           <p className="mt-3 text-xs text-slate-500">
-            Gototrip essaie d’utiliser Booking si l’API est configurée. Sinon, les
-            résultats viennent de Google Places avec prix estimatifs.
+            Les hébergements sont actuellement trouvés via Google Places. Le bouton
+            “Voir sur Booking” ouvre une recherche Booking avec votre lien affilié CJ.
           </p>
         </section>
 
@@ -616,13 +708,6 @@ export default function StaysPage() {
           <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700 flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" />
             Chargement des hébergements autour de {trip.destination.city}...
-          </div>
-        )}
-
-        {sourceWarning && (
-          <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            <div className="font-semibold">Information source</div>
-            <div>{sourceWarning}</div>
           </div>
         )}
 
@@ -707,7 +792,8 @@ export default function StaysPage() {
                           </div>
 
                           <p className="text-sm text-slate-600">
-                            {stay.description || generateStayDescription(stay, activeFilters)}
+                            {stay.description ||
+                              generateStayDescription(stay, activeFilters)}
                           </p>
                         </div>
 
@@ -723,7 +809,7 @@ export default function StaysPage() {
                         </div>
 
                         <p className="mt-3 text-xs text-slate-500">
-                          Prix et disponibilité à confirmer sur le site partenaire.
+                          Prix et disponibilité à confirmer sur Booking.
                         </p>
                       </div>
 
@@ -756,12 +842,24 @@ export default function StaysPage() {
                         </button>
 
                         <a
-                          href={stay.link || stay.googleMapsUri || '#'}
+                          href={bookingAffiliatePath}
                           target="_blank"
-                          className="mt-2 block text-xs text-teal-700 underline"
+                          rel="noreferrer"
+                          className="mt-2 block rounded-xl border border-teal-200 px-4 py-2 text-center text-xs font-semibold text-teal-700 hover:bg-teal-50"
                         >
-                          Site / partenaire
+                          Voir sur Booking
                         </a>
+
+                        {stay.googleMapsUri && (
+                          <a
+                            href={stay.googleMapsUri}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 block text-xs text-slate-500 underline"
+                          >
+                            Voir sur Google Maps
+                          </a>
+                        )}
                       </div>
                     </div>
                   </article>

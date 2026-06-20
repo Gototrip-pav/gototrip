@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
+  CalendarPlus,
   ChevronRight,
   Home,
   MapPin,
@@ -22,7 +23,14 @@ import {
 } from 'lucide-react';
 import TripMap from '../components/TripMap';
 import PlanningEditor from '../components/PlanningEditor';
-import { buildOptimizedPlanning } from '../utils/tripPlanner';
+import {
+  buildOptimizedPlanning,
+  type OptimizedDay,
+} from '../utils/tripPlanner';
+import {
+  buildGototripCalendarIcs,
+  downloadIcsFile,
+} from '../utils/calendarExport';
 
 type TransportId = 'plane' | 'train' | 'bus' | 'car';
 
@@ -413,6 +421,7 @@ function estimateLocalMobility(selection: StoredSelection): LocalMobility {
 export default function SummaryPage() {
   const router = useRouter();
   const [selection, setSelection] = useState<StoredSelection | null>(null);
+  const [customPlanning, setCustomPlanning] = useState<OptimizedDay[] | null>(null);
 
   useEffect(() => {
     const raw = localStorage.getItem('gt_selection');
@@ -426,6 +435,23 @@ export default function SummaryPage() {
       setSelection(JSON.parse(raw));
     } catch {
       setSelection(null);
+    }
+
+    try {
+      const rawCustomPlanning = localStorage.getItem('gt_custom_planning');
+
+      if (rawCustomPlanning) {
+        const parsedCustomPlanning = JSON.parse(rawCustomPlanning);
+
+        if (
+          Array.isArray(parsedCustomPlanning) &&
+          parsedCustomPlanning.length > 0
+        ) {
+          setCustomPlanning(parsedCustomPlanning);
+        }
+      }
+    } catch {
+      setCustomPlanning(null);
     }
   }, []);
 
@@ -475,6 +501,28 @@ export default function SummaryPage() {
       stays: selection.selections?.stays || [],
     });
   }, [selection]);
+
+  const planningForExport = useMemo(() => {
+    return customPlanning && customPlanning.length > 0 ? customPlanning : planning;
+  }, [customPlanning, planning]);
+
+  const downloadCalendar = () => {
+    if (!selection) return;
+
+    const icsContent = buildGototripCalendarIcs({
+      tripTitle: `Voyage Gototrip - ${selection.destination.city}`,
+      city: selection.destination.city,
+      country: selection.destination.country,
+      startDate: selection.startDate || selection.start || null,
+      duration: selection.duration,
+      days: planningForExport,
+    });
+
+    downloadIcsFile(
+      `planning-gototrip-${selection.destination.city}`,
+      icsContent
+    );
+  };
 
   const goHome = () => {
     router.push('/');
@@ -824,7 +872,52 @@ export default function SummaryPage() {
             getUrl={(item) => getStayReservationUrl(item, selection)}
           />
 
-          <PlanningEditor autoPlanning={planning} />
+          <PlanningEditor
+            planning={planning}
+            autoPlanning={planning}
+            onChange={(days: OptimizedDay[]) => setCustomPlanning(days)}
+            onPlanningChange={(days: OptimizedDay[]) => setCustomPlanning(days)}
+          />
+
+          <section className="rounded-2xl border border-teal-200 bg-teal-50 p-5 lg:col-span-3">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold text-teal-700">
+                  <CalendarPlus className="h-4 w-4" />
+                  Agenda téléphone
+                </div>
+
+                <h2 className="text-xl font-bold text-teal-950">
+                  Ajouter ce voyage à mon agenda
+                </h2>
+
+                <p className="mt-2 max-w-3xl text-sm text-teal-900">
+                  Téléchargez le planning au format calendrier. Il peut être
+                  ajouté sur iPhone, Google Agenda, Outlook, Samsung Calendar ou
+                  l’agenda de votre téléphone.
+                </p>
+
+                <p className="mt-2 text-xs text-teal-800">
+                  Le fichier contient le voyage complet et les étapes du planning
+                  jour par jour avec horaires.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={downloadCalendar}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                <CalendarPlus className="h-4 w-4" />
+                Ajouter à mon agenda
+              </button>
+            </div>
+
+            <p className="mt-4 text-xs text-teal-800">
+              Si votre téléphone ne l’ouvre pas automatiquement, ouvrez le
+              fichier .ics téléchargé puis choisissez votre application d’agenda.
+            </p>
+          </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-3">
             <h2 className="mb-4 text-xl font-bold">Je réserve</h2>

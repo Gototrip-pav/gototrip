@@ -159,9 +159,104 @@ function normalizeText(value: string) {
     .replace(/\p{Diacritic}/gu, '');
 }
 
+function isUsableUrl(value?: string | null) {
+  const url = String(value || '').trim();
+
+  return Boolean(url && url !== '#');
+}
+
+function getCheckoutDate(start: string | null | undefined, nights: number) {
+  if (!start) return '';
+
+  const date = new Date(`${start}T12:00:00`);
+
+  if (Number.isNaN(date.getTime())) return '';
+
+  date.setDate(date.getDate() + Math.max(1, nights));
+
+  return date.toISOString().slice(0, 10);
+}
+
+function buildAffiliatePath(
+  provider: 'booking' | 'getyourguide',
+  selection: StoredSelection
+) {
+  const params = new URLSearchParams({
+    provider,
+    city: selection.destination.city || '',
+    country: selection.destination.country || '',
+    redirect: '1',
+  });
+
+  if (provider === 'booking') {
+    const checkin = selection.startDate || selection.start || '';
+    const checkout = getCheckoutDate(checkin, selection.nights || 1);
+
+    params.set('persons', String(selection.persons || 1));
+
+    if (checkin) {
+      params.set('checkin', checkin);
+    }
+
+    if (checkout) {
+      params.set('checkout', checkout);
+    }
+  }
+
+  return `/api/affiliate-links?${params.toString()}`;
+}
+
 function getValidUrl(place?: Place | null) {
   if (!place) return '#';
-  return place.link || place.googleMapsUri || '#';
+
+  if (isUsableUrl(place.link)) {
+    return place.link as string;
+  }
+
+  if (isUsableUrl(place.googleMapsUri)) {
+    return place.googleMapsUri as string;
+  }
+
+  return '#';
+}
+
+function getActivityReservationUrl(place: Place, selection: StoredSelection) {
+  const link = String(place.link || '');
+
+  if (
+    link.includes('getyourguide') ||
+    link.includes('gyg.me') ||
+    link.includes('provider=getyourguide')
+  ) {
+    return link;
+  }
+
+  return buildAffiliatePath('getyourguide', selection);
+}
+
+function getStayReservationUrl(place: Place, selection: StoredSelection) {
+  const link = String(place.link || '');
+
+  if (
+    link.includes('booking.com') ||
+    link.includes('anrdoezrs.net') ||
+    link.includes('tkqlhce.com') ||
+    link.includes('jdoqocy.com') ||
+    link.includes('dpbolvw.net') ||
+    link.includes('provider=booking')
+  ) {
+    return link;
+  }
+
+  return buildAffiliatePath('booking', selection);
+}
+
+function getRestaurantReservationUrl(place: Place) {
+  if (isUsableUrl(place.googleMapsUri)) {
+    return place.googleMapsUri as string;
+  }
+
+  return getValidUrl(place);
 }
 
 function getTransportIcon(id?: TransportId) {
@@ -343,24 +438,26 @@ export default function SummaryPage() {
         lat: Number(selection.destination.lat),
         lng: Number(selection.destination.lng),
       },
-      ...(selection.selections?.activities || []).map((a) => ({
-        name: a.name,
-        lat: Number(a.lat),
-        lng: Number(a.lng),
+      ...(selection.selections?.activities || []).map((activity) => ({
+        name: activity.name,
+        lat: Number(activity.lat),
+        lng: Number(activity.lng),
       })),
-      ...(selection.selections?.restaurants || []).map((r) => ({
-        name: r.name,
-        lat: Number(r.lat),
-        lng: Number(r.lng),
+      ...(selection.selections?.restaurants || []).map((restaurant) => ({
+        name: restaurant.name,
+        lat: Number(restaurant.lat),
+        lng: Number(restaurant.lng),
       })),
-      ...(selection.selections?.stays || []).map((h) => ({
-        name: h.name,
-        lat: Number(h.lat),
-        lng: Number(h.lng),
+      ...(selection.selections?.stays || []).map((stay) => ({
+        name: stay.name,
+        lat: Number(stay.lat),
+        lng: Number(stay.lng),
       })),
     ];
 
-    return points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    return points.filter((point) =>
+      Number.isFinite(point.lat) && Number.isFinite(point.lng)
+    );
   }, [selection]);
 
   const planning = useMemo(() => {
@@ -406,6 +503,7 @@ export default function SummaryPage() {
 
           <div className="flex flex-col gap-3">
             <button
+              type="button"
               onClick={goHome}
               className="rounded-xl bg-slate-900 px-4 py-2 text-white hover:bg-slate-800"
             >
@@ -413,6 +511,7 @@ export default function SummaryPage() {
             </button>
 
             <button
+              type="button"
               onClick={goDestinations}
               className="rounded-xl border border-slate-200 px-4 py-2 text-slate-700 hover:bg-slate-50"
             >
@@ -466,6 +565,7 @@ export default function SummaryPage() {
       <div className="mx-auto max-w-7xl px-4 py-8">
         <div className="mb-6 flex flex-wrap gap-3">
           <button
+            type="button"
             onClick={goHome}
             className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
           >
@@ -474,6 +574,7 @@ export default function SummaryPage() {
           </button>
 
           <button
+            type="button"
             onClick={goDestinations}
             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
           >
@@ -482,6 +583,7 @@ export default function SummaryPage() {
           </button>
 
           <button
+            type="button"
             onClick={goTransport}
             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
           >
@@ -490,6 +592,7 @@ export default function SummaryPage() {
           </button>
 
           <button
+            type="button"
             onClick={() => router.back()}
             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
           >
@@ -586,6 +689,7 @@ export default function SummaryPage() {
               <a
                 href={localMobility.partnerUrl}
                 target="_blank"
+                rel="noreferrer"
                 className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
               >
                 {localMobility.partnerLabel}
@@ -694,8 +798,9 @@ export default function SummaryPage() {
             icon={<Ticket className="h-5 w-5" />}
             items={activities}
             emptyText="Aucune activité sélectionnée."
-            buttonLabel="Voir l’activité"
+            buttonLabel="Réserver sur GetYourGuide"
             priceSuffix="/ personne"
+            getUrl={(item) => getActivityReservationUrl(item, selection)}
           />
 
           <SectionChoices
@@ -705,6 +810,7 @@ export default function SummaryPage() {
             emptyText="Aucun restaurant sélectionné."
             buttonLabel="Voir le restaurant"
             priceSuffix="/ personne"
+            getUrl={(item) => getRestaurantReservationUrl(item)}
           />
 
           <SectionChoices
@@ -712,9 +818,10 @@ export default function SummaryPage() {
             icon={<Hotel className="h-5 w-5" />}
             items={stays}
             emptyText="Aucun hébergement sélectionné."
-            buttonLabel="Voir l’hébergement"
+            buttonLabel="Voir sur Booking"
             priceSuffix="/ nuit / personne"
             useNightPrice
+            getUrl={(item) => getStayReservationUrl(item, selection)}
           />
 
           <PlanningEditor autoPlanning={planning} />
@@ -754,8 +861,8 @@ export default function SummaryPage() {
                   key={stay.id}
                   title="Hébergement"
                   subtitle={stay.name}
-                  url={getValidUrl(stay)}
-                  buttonLabel="Réserver"
+                  url={getStayReservationUrl(stay, selection)}
+                  buttonLabel="Voir sur Booking"
                   icon={<Hotel className="h-5 w-5" />}
                 />
               ))}
@@ -765,8 +872,8 @@ export default function SummaryPage() {
                   key={activity.id}
                   title="Activité"
                   subtitle={activity.name}
-                  url={getValidUrl(activity)}
-                  buttonLabel="Réserver"
+                  url={getActivityReservationUrl(activity, selection)}
+                  buttonLabel="Réserver sur GetYourGuide"
                   icon={<Ticket className="h-5 w-5" />}
                 />
               ))}
@@ -776,14 +883,15 @@ export default function SummaryPage() {
                   key={restaurant.id}
                   title="Restaurant"
                   subtitle={restaurant.name}
-                  url={getValidUrl(restaurant)}
-                  buttonLabel="Réserver"
+                  url={getRestaurantReservationUrl(restaurant)}
+                  buttonLabel="Voir le restaurant"
                   icon={<Utensils className="h-5 w-5" />}
                 />
               ))}
             </div>
 
             <button
+              type="button"
               onClick={goHome}
               className="mt-6 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-white hover:bg-slate-800"
             >
@@ -849,6 +957,7 @@ function SectionChoices({
   buttonLabel,
   priceSuffix,
   useNightPrice = false,
+  getUrl,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -857,6 +966,7 @@ function SectionChoices({
   buttonLabel: string;
   priceSuffix: string;
   useNightPrice?: boolean;
+  getUrl: (item: Place) => string;
 }) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-3">
@@ -884,7 +994,7 @@ function SectionChoices({
               }
               rating={item.rating}
               userRatingCount={item.userRatingCount}
-              url={getValidUrl(item)}
+              url={getUrl(item)}
               buttonLabel={buttonLabel}
               priceSuffix={priceSuffix}
             />
@@ -946,6 +1056,7 @@ function ChoiceCard({
       <a
         href={url}
         target="_blank"
+        rel="noreferrer"
         className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
       >
         {buttonLabel}
@@ -979,6 +1090,7 @@ function ReservationCard({
       <a
         href={url}
         target="_blank"
+        rel="noreferrer"
         className="inline-flex w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
       >
         {buttonLabel}

@@ -56,12 +56,13 @@ function getApiStatuses(): ApiStatus[] {
   const googleMapsConfigured = hasEnv('NEXT_PUBLIC_GOOGLE_MAPS_API_KEY');
   const googlePlacesConfigured = hasEnv('GOOGLE_PLACES_API_KEY');
   const duffelConfigured = hasEnv('DUFFEL_ACCESS_TOKEN');
-  const bookingCjConfigured = hasEnv('BOOKING_CJ_AFFILIATE_URL');
 
+  const bookingCjConfigured = hasEnv('BOOKING_CJ_AFFILIATE_URL');
   const bookingDemandConfigured =
     hasEnv('BOOKING_API_TOKEN') && hasEnv('BOOKING_AFFILIATE_ID');
 
-  const getYourGuideConfigured = hasEnv('GETYOURGUIDE_API_TOKEN');
+  const getYourGuideAffiliateConfigured = hasEnv('GETYOURGUIDE_AFFILIATE_URL');
+  const getYourGuideApiConfigured = hasEnv('GETYOURGUIDE_API_TOKEN');
 
   return [
     {
@@ -126,13 +127,29 @@ function getApiStatuses(): ApiStatus[] {
       ],
     },
     {
-      id: 'getyourguide',
-      name: 'GetYourGuide',
-      status: getYourGuideConfigured ? 'active' : 'missing',
-      configured: getYourGuideConfigured,
-      details: getYourGuideConfigured
-        ? 'GetYourGuide est configuré pour enrichir les activités.'
-        : 'GetYourGuide n’est pas configuré. Gototrip utilise Google Places pour les activités.',
+      id: 'getyourguide-affiliate',
+      name: 'GetYourGuide Affiliation',
+      status: getYourGuideAffiliateConfigured ? 'active' : 'missing',
+      configured: getYourGuideAffiliateConfigured,
+      details: getYourGuideAffiliateConfigured
+        ? 'Le lien affilié GetYourGuide est configuré. Les boutons “Réserver sur GetYourGuide” peuvent tracker les clics.'
+        : 'Lien affilié GetYourGuide manquant. Variable attendue : GETYOURGUIDE_AFFILIATE_URL.',
+      env: [envStatus('GETYOURGUIDE_AFFILIATE_URL')],
+    },
+    {
+      id: 'getyourguide-api',
+      name: 'GetYourGuide API',
+      status: getYourGuideApiConfigured
+        ? 'active'
+        : getYourGuideAffiliateConfigured
+          ? 'partial'
+          : 'missing',
+      configured: getYourGuideApiConfigured,
+      details: getYourGuideApiConfigured
+        ? 'GetYourGuide API est configurée pour enrichir les activités avec de vraies offres partenaires.'
+        : getYourGuideAffiliateConfigured
+          ? 'GetYourGuide API n’est pas configurée. Ce n’est pas bloquant : Gototrip utilise Google Places + le lien affilié GetYourGuide.'
+          : 'GetYourGuide API non configurée. Variable attendue : GETYOURGUIDE_API_TOKEN.',
       env: [
         envStatus('GETYOURGUIDE_API_TOKEN'),
         envStatus('GETYOURGUIDE_API_BASE_URL'),

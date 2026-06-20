@@ -187,7 +187,8 @@ function getCheckoutDate(start: string | null | undefined, nights: number) {
 
 function buildAffiliatePath(
   provider: 'booking' | 'getyourguide',
-  selection: StoredSelection
+  selection: StoredSelection,
+  place?: Place | null
 ) {
   const params = new URLSearchParams({
     provider,
@@ -195,6 +196,10 @@ function buildAffiliatePath(
     country: selection.destination.country || '',
     redirect: '1',
   });
+
+  if (provider === 'getyourguide' && place?.name) {
+    params.set('activity', place.name);
+  }
 
   if (provider === 'booking') {
     const checkin = selection.startDate || selection.start || '';
@@ -229,17 +234,7 @@ function getValidUrl(place?: Place | null) {
 }
 
 function getActivityReservationUrl(place: Place, selection: StoredSelection) {
-  const link = String(place.link || '');
-
-  if (
-    link.includes('getyourguide') ||
-    link.includes('gyg.me') ||
-    link.includes('provider=getyourguide')
-  ) {
-    return link;
-  }
-
-  return buildAffiliatePath('getyourguide', selection);
+  return buildAffiliatePath('getyourguide', selection, place);
 }
 
 function getStayReservationUrl(place: Place, selection: StoredSelection) {

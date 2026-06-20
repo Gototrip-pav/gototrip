@@ -520,7 +520,10 @@ function normalizeActivity(raw: any): Activity {
   };
 }
 
-function getActivityBookingPath(trip: TripSelection | null) {
+function getActivityBookingPath(
+  trip: TripSelection | null,
+  activity?: Activity | null
+) {
   if (!trip?.destination) return '#';
 
   const params = new URLSearchParams({
@@ -529,6 +532,10 @@ function getActivityBookingPath(trip: TripSelection | null) {
     country: trip.destination.country || '',
     redirect: '1',
   });
+
+  if (activity?.name) {
+    params.set('activity', activity.name);
+  }
 
   return `/api/affiliate-links?${params.toString()}`;
 }
@@ -567,12 +574,10 @@ export default function ActivitiesPage() {
       return;
     }
 
-    const getYourGuideLink = getActivityBookingPath(parsedSelection);
-
     const previousActivities = (parsedSelection.selections?.activities || []).map(
       (activity) => ({
         ...activity,
-        link: activity.link || getYourGuideLink,
+        link: getActivityBookingPath(parsedSelection, activity),
         pricePerPerson: Number(activity.pricePerPerson || 0),
         description:
           activity.description || generateActivityDescription(activity, []),
@@ -659,12 +664,14 @@ export default function ActivitiesPage() {
             ? json.places
             : [];
 
-        const getYourGuideLink = getActivityBookingPath(trip);
+        const mapped = rawActivities.map((rawActivity: any) => {
+          const normalizedActivity = normalizeActivity(rawActivity);
 
-        const mapped = rawActivities.map((rawActivity: any) => ({
-          ...normalizeActivity(rawActivity),
-          link: getYourGuideLink,
-        }));
+          return {
+            ...normalizedActivity,
+            link: getActivityBookingPath(trip, normalizedActivity),
+          };
+        });
 
         setActivities(mapped);
       } catch (e: any) {
@@ -691,7 +698,6 @@ export default function ActivitiesPage() {
   }, [activities, activeFilters]);
 
   const persons = trip?.persons || 1;
-  const getYourGuideLink = getActivityBookingPath(trip);
 
   const activitiesTotal = useMemo(() => {
     return selectedActivities.reduce(
@@ -739,7 +745,7 @@ export default function ActivitiesPage() {
 
       const activityToStore: Activity = {
         ...activity,
-        link: getYourGuideLink,
+        link: getActivityBookingPath(trip, activity),
         pricePerPerson: Number(activity.pricePerPerson || 0),
         description:
           activity.description || generateActivityDescription(activity, activeFilters),
@@ -754,7 +760,7 @@ export default function ActivitiesPage() {
 
     const selectedActivitiesWithLinks = selectedActivities.map((activity) => ({
       ...activity,
-      link: activity.link || getYourGuideLink,
+      link: getActivityBookingPath(trip, activity),
     }));
 
     const nextSelection: TripSelection = {
@@ -883,8 +889,8 @@ export default function ActivitiesPage() {
           </div>
 
           <p className="mt-3 text-xs text-slate-500">
-            Le filtre “Gratuit” affiche uniquement les activités réellement estimées
-            gratuites. Il ne remet plus les prix des autres activités à 0€.
+            Le bouton “Réserver sur GetYourGuide” ouvre une recherche liée au nom
+            de l’activité, à la ville et au pays, avec votre identifiant partenaire.
           </p>
         </section>
 
@@ -916,6 +922,10 @@ export default function ActivitiesPage() {
                 const total = Number(activity.pricePerPerson || 0) * persons;
                 const readableTypes = getReadableTypes(activity);
                 const isFree = isActuallyFreeActivity(activity);
+                const activityGetYourGuideLink = getActivityBookingPath(
+                  trip,
+                  activity
+                );
 
                 return (
                   <article
@@ -1030,7 +1040,7 @@ export default function ActivitiesPage() {
                         </button>
 
                         <a
-                          href={getYourGuideLink}
+                          href={activityGetYourGuideLink}
                           target="_blank"
                           rel="noreferrer"
                           className="mt-2 block rounded-xl border border-teal-200 px-4 py-2 text-center text-xs font-semibold text-teal-700 hover:bg-teal-50"

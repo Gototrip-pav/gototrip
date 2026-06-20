@@ -9,6 +9,7 @@ type AffiliateLinkPayload = {
   provider?: string;
   city?: string;
   country?: string;
+  activity?: string;
   checkin?: string;
   checkout?: string;
   persons?: number;
@@ -95,15 +96,19 @@ function buildBookingAffiliateUrl(payload: AffiliateLinkPayload) {
   };
 }
 
-function buildGetYourGuideSearchUrl({ city, country }: AffiliateLinkPayload) {
-  const destination = [cleanValue(city), cleanValue(country)]
+function buildGetYourGuideSearchUrl({
+  activity,
+  city,
+  country,
+}: AffiliateLinkPayload) {
+  const searchQuery = [cleanValue(activity), cleanValue(city), cleanValue(country)]
     .filter(Boolean)
     .join(' ');
 
   const getYourGuideUrl = new URL('https://www.getyourguide.fr/s/');
 
-  if (destination) {
-    getYourGuideUrl.searchParams.set('q', destination);
+  if (searchQuery) {
+    getYourGuideUrl.searchParams.set('q', searchQuery);
   }
 
   return getYourGuideUrl.toString();
@@ -125,7 +130,7 @@ function buildGetYourGuidePartnerUrl(payload: AffiliateLinkPayload) {
     destinationUrl,
     url: url.toString(),
     note: partnerId
-      ? 'Lien GetYourGuide dynamique utilisé avec partner_id.'
+      ? 'Lien GetYourGuide dynamique utilisé avec activity + city + country + partner_id.'
       : 'GETYOURGUIDE_PARTNER_ID non configuré. Gototrip ouvre la recherche GetYourGuide sans tracking partenaire.',
   };
 }
@@ -204,6 +209,7 @@ export async function GET(request: Request) {
     provider: cleanValue(searchParams.get('provider')) || 'booking',
     city: cleanValue(searchParams.get('city')),
     country: cleanValue(searchParams.get('country')),
+    activity: cleanValue(searchParams.get('activity')),
     checkin: cleanValue(searchParams.get('checkin')),
     checkout: cleanValue(searchParams.get('checkout')),
     persons: Number(searchParams.get('persons') || 1),

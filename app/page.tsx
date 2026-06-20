@@ -40,9 +40,15 @@ type CitySuggestion = {
   lng?: number;
 };
 
+type EnvironmentId = 'mer' | 'montagne' | 'ville' | 'nature' | 'campagne';
 type DestinationStyleId = 'classic' | 'surprising' | 'offbeat';
+type LodgingId = 'hotel' | 'appartement' | 'maison' | 'auberge' | 'camping';
 
-const ENVIRONMENTS = [
+const ENVIRONMENTS: {
+  id: EnvironmentId;
+  label: string;
+  icon: React.ReactNode;
+}[] = [
   {
     id: 'mer',
     label: 'Mer',
@@ -96,7 +102,11 @@ const DESTINATION_STYLES: {
   },
 ];
 
-const LODGINGS = [
+const LODGINGS: {
+  id: LodgingId;
+  label: string;
+  icon: React.ReactNode;
+}[] = [
   {
     id: 'hotel',
     label: 'Hôtel',
@@ -140,11 +150,12 @@ export default function HomePage() {
   const [budget, setBudget] = useState('');
   const [duration, setDuration] = useState('');
   const [startDate, setStartDate] = useState('');
-  const [environment, setEnvironment] = useState('');
+
+  const [environments, setEnvironments] = useState<EnvironmentId[]>([]);
   const [destinationStyles, setDestinationStyles] = useState<DestinationStyleId[]>([
     'surprising',
   ]);
-  const [lodging, setLodging] = useState('');
+  const [lodgings, setLodgings] = useState<LodgingId[]>([]);
 
   const canSubmit = useMemo(() => {
     return (
@@ -249,6 +260,14 @@ export default function HomePage() {
     setShowCitySuggestions(true);
   };
 
+  const toggleEnvironment = (environmentId: EnvironmentId) => {
+    setEnvironments((current) =>
+      current.includes(environmentId)
+        ? current.filter((id) => id !== environmentId)
+        : [...current, environmentId]
+    );
+  };
+
   const toggleDestinationStyle = (styleId: DestinationStyleId) => {
     setDestinationStyles((current) => {
       if (current.includes(styleId)) {
@@ -265,8 +284,19 @@ export default function HomePage() {
     });
   };
 
+  const toggleLodging = (lodgingId: LodgingId) => {
+    setLodgings((current) =>
+      current.includes(lodgingId)
+        ? current.filter((id) => id !== lodgingId)
+        : [...current, lodgingId]
+    );
+  };
+
   const goToDestinations = () => {
     if (!canSubmit) return;
+
+    const selectedEnvironments = environments.join(',');
+    const selectedLodgings = lodgings.join(',');
 
     const query = new URLSearchParams();
 
@@ -280,12 +310,12 @@ export default function HomePage() {
       query.set('start', startDate);
     }
 
-    if (environment) {
-      query.set('environment', environment);
+    if (selectedEnvironments) {
+      query.set('environment', selectedEnvironments);
     }
 
-    if (lodging) {
-      query.set('lodging', lodging);
+    if (selectedLodgings) {
+      query.set('lodging', selectedLodgings);
     }
 
     const criteria = {
@@ -296,10 +326,12 @@ export default function HomePage() {
       duration: Number(duration),
       nights: Math.max(1, Number(duration) - 1),
       start: startDate || null,
-      environment,
+      environment: selectedEnvironments,
+      environments,
       destinationStyle: destinationStyles.join(','),
       destinationStyles,
-      lodging,
+      lodging: selectedLodgings,
+      lodgings,
     };
 
     localStorage.setItem('gt_criteria', JSON.stringify(criteria));
@@ -465,18 +497,18 @@ export default function HomePage() {
             </div>
 
             <div>
-              <h2 className="mb-3 text-sm font-bold">Environnement</h2>
+              <h2 className="mb-3 text-sm font-bold">Environnements</h2>
+
+              <p className="mb-3 text-xs text-slate-500">
+                Sélection multiple possible : mer, montagne, ville, nature ou campagne.
+              </p>
 
               <div className="flex flex-wrap gap-2">
                 {ENVIRONMENTS.map((item) => (
                   <FilterButton
                     key={item.id}
-                    active={environment === item.id}
-                    onClick={() =>
-                      setEnvironment((current) =>
-                        current === item.id ? '' : item.id
-                      )
-                    }
+                    active={environments.includes(item.id)}
+                    onClick={() => toggleEnvironment(item.id)}
                     icon={item.icon}
                     label={item.label}
                   />
@@ -538,16 +570,18 @@ export default function HomePage() {
             </div>
 
             <div>
-              <h2 className="mb-3 text-sm font-bold">Hébergement souhaité</h2>
+              <h2 className="mb-3 text-sm font-bold">Hébergements souhaités</h2>
+
+              <p className="mb-3 text-xs text-slate-500">
+                Sélection multiple possible : hôtel, appartement, maison, auberge ou camping.
+              </p>
 
               <div className="flex flex-wrap gap-2">
                 {LODGINGS.map((item) => (
                   <FilterButton
                     key={item.id}
-                    active={lodging === item.id}
-                    onClick={() =>
-                      setLodging((current) => (current === item.id ? '' : item.id))
-                    }
+                    active={lodgings.includes(item.id)}
+                    onClick={() => toggleLodging(item.id)}
                     icon={item.icon}
                     label={item.label}
                   />
@@ -606,7 +640,7 @@ export default function HomePage() {
               />
               <FeatureLine
                 title="Sélection multiple"
-                text="Classique, surprenante et décalée peuvent être combinées."
+                text="Classique, surprenante, décalée, mer, montagne, ville, nature et hébergements peuvent être combinés."
               />
               <FeatureLine
                 title="Effet pépite"

@@ -41,6 +41,11 @@ type ApiDestination = {
   source?: string;
   destinationStyle?: string;
   destinationStyleLabel?: string;
+  environments?: string[];
+  distanceKm?: number | null;
+  score?: number;
+  budgetLevel?: string;
+  coherenceReason?: string;
 };
 
 type TransportId = 'car' | 'bus' | 'train' | 'plane';
@@ -105,6 +110,7 @@ type Criteria = {
   lodging: string;
   environment: string;
   destinationStyle: string;
+  sameCountry: boolean;
 };
 
 type Coords = {
@@ -125,6 +131,12 @@ function normalizeText(value: string) {
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '');
+}
+
+function isTruthy(value: string | null | undefined) {
+  const normalized = normalizeText(value || '');
+
+  return ['1', 'true', 'yes', 'oui', 'on'].includes(normalized);
 }
 
 function toRad(value: number) {
@@ -195,6 +207,10 @@ function getCriteria(searchParams: URLSearchParams): Criteria {
     destinationStyle:
       getFirstQueryValue(searchParams, ['destinationStyle', 'style']) ||
       'surprising',
+    sameCountry:
+      isTruthy(searchParams.get('sameCountry')) ||
+      isTruthy(searchParams.get('staySameCountry')) ||
+      isTruthy(searchParams.get('domesticOnly')),
   };
 }
 
@@ -629,6 +645,11 @@ function getBaseMatchScore(destination: ApiDestination, criteria: Criteria) {
     reasons.push(`Départ pris en compte depuis ${criteria.departureCity}.`);
   }
 
+  if (criteria.sameCountry) {
+    score += 6;
+    reasons.push('Recherche limitée au même pays que le départ.');
+  }
+
   if (destination.destinationStyleLabel) {
     score += 6;
     reasons.push(`Style demandé : ${destination.destinationStyleLabel}.`);
@@ -645,14 +666,36 @@ function getBaseMatchScore(destination: ApiDestination, criteria: Criteria) {
   };
 }
 
+function getApiCoherenceScore(destination: ApiDestination, fallbackScore: number) {
+  const rawScore = Number(destination.score || 0);
+
+  if (!Number.isFinite(rawScore) || rawScore <= 0) {
+    return Math.max(0, Math.min(100, fallbackScore));
+  }
+
+  const normalizedApiScore = Math.round(
+    Math.max(55, Math.min(95, rawScore / 6))
+  );
+
+  return Math.max(fallbackScore, normalizedApiScore);
+}
+
 async function fetchApiDestinations(criteria: Criteria) {
   const params = new URLSearchParams();
+
+  if (criteria.departureCity) {
+    params.set('departure', criteria.departureCity);
+  }
 
   if (criteria.environment) params.set('environment', criteria.environment);
   if (criteria.lodging) params.set('lodging', criteria.lodging);
   if (criteria.budget) params.set('budget', String(criteria.budget));
   if (criteria.destinationStyle) {
     params.set('destinationStyle', criteria.destinationStyle);
+  }
+
+  if (criteria.sameCountry) {
+    params.set('sameCountry', '1');
   }
 
   params.set('persons', String(criteria.persons));
@@ -794,6 +837,7 @@ export default function DestinationsPage() {
         lodging: criteria.lodging,
         environment: criteria.environment,
         destinationStyle: criteria.destinationStyle,
+        sameCountry: criteria.sameCountry,
       })
     );
   }, [criteria]);
@@ -851,6 +895,10 @@ export default function DestinationsPage() {
         const initialRecommendations: DestinationRecommendation[] = destinations.map(
           (destination: ApiDestination) => {
             const base = getBaseMatchScore(destination, criteria);
+            const score = getApiCoherenceScore(destination, base.score);
+            const reasons = destination.coherenceReason
+              ? [destination.coherenceReason, ...base.reasons]
+              : base.reasons;
 
             return {
               slug: destination.slug,
@@ -866,9 +914,9 @@ export default function DestinationsPage() {
               source: destination.source || 'Google Places',
               destinationStyle: destination.destinationStyle,
               destinationStyleLabel: destination.destinationStyleLabel,
-              score: base.score,
-              scoreLabel: getScoreLabel(base.score),
-              reasons: base.reasons,
+              score,
+              scoreLabel: getScoreLabel(score),
+              reasons,
               warnings: [],
               totalEstimate: 0,
               budgetStatus: 'unknown',
@@ -894,7 +942,7 @@ export default function DestinationsPage() {
               activitiesCount: 0,
               restaurantsCount: 0,
               staysCount: 0,
-              distanceKm: 0,
+              distanceKm: Number(destination.distanceKm || 0),
               loading: true,
             };
           }
@@ -911,6 +959,8 @@ export default function DestinationsPage() {
             try {
               const places = await fetchPlacesSummary(destination, criteria);
 
+              const apiDistance = Number(destination.distanceKm || 0);
+
               const distanceKm = departureCoords
                 ? getDistanceKm(
                     departureCoords.lat,
@@ -918,7 +968,9 @@ export default function DestinationsPage() {
                     Number(destination.lat),
                     Number(destination.lng)
                   )
-                : 300;
+                : Number.isFinite(apiDistance) && apiDistance > 0
+                  ? Math.round(apiDistance)
+                  : 300;
 
               const bestTransport = buildTransportEstimates({
                 distanceKm,
@@ -937,8 +989,12 @@ export default function DestinationsPage() {
                 staysCount: places.staysCount,
               });
 
-              let score = base.score;
-              const reasons = [...base.reasons];
+              let score = getApiCoherenceScore(destination, base.score);
+
+              const reasons = destination.coherenceReason
+                ? [destination.coherenceReason, ...base.reasons]
+                : [...base.reasons];
+
               const warnings: string[] = [];
 
               if (places.activitiesCount >= 5) {
@@ -1076,7 +1132,11 @@ export default function DestinationsPage() {
                 loading: false,
               };
             } catch {
-              const fallbackDistance = 300;
+              const apiDistance = Number(destination.distanceKm || 0);
+              const fallbackDistance =
+                Number.isFinite(apiDistance) && apiDistance > 0
+                  ? Math.round(apiDistance)
+                  : 300;
 
               const bestTransport = buildTransportEstimates({
                 distanceKm: fallbackDistance,
@@ -1118,6 +1178,11 @@ export default function DestinationsPage() {
                 ? totalEstimate - criteria.budget
                 : 0;
 
+              const score = Math.max(
+                0,
+                Math.min(100, getApiCoherenceScore(destination, base.score) - 10)
+              );
+
               return {
                 slug: destination.slug,
                 city: destination.city,
@@ -1132,9 +1197,11 @@ export default function DestinationsPage() {
                 source: destination.source || 'Google Places',
                 destinationStyle: destination.destinationStyle,
                 destinationStyleLabel: destination.destinationStyleLabel,
-                score: Math.max(0, base.score - 10),
-                scoreLabel: getScoreLabel(Math.max(0, base.score - 10)),
-                reasons: base.reasons,
+                score,
+                scoreLabel: getScoreLabel(score),
+                reasons: destination.coherenceReason
+                  ? [destination.coherenceReason, ...base.reasons]
+                  : base.reasons,
                 warnings: ['Données en ligne incomplètes pour cette destination.'],
                 totalEstimate,
                 budgetStatus,
@@ -1220,6 +1287,10 @@ export default function DestinationsPage() {
     query.set('duration', String(criteria.duration));
     query.set('destinationStyle', criteria.destinationStyle);
 
+    if (criteria.sameCountry) {
+      query.set('sameCountry', '1');
+    }
+
     if (criteria.start) {
       query.set('start', criteria.start);
     }
@@ -1289,7 +1360,7 @@ export default function DestinationsPage() {
             )}
           </div>
 
-          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <CriteriaCard
               label="Départ"
               value={criteria.departureCity || 'Non renseigné'}
@@ -1318,6 +1389,12 @@ export default function DestinationsPage() {
               label="Style"
               value={getDestinationStyleText(criteria.destinationStyle)}
               icon={<Sparkles className="h-4 w-4" />}
+            />
+
+            <CriteriaCard
+              label="Pays"
+              value={criteria.sameCountry ? 'Même pays uniquement' : 'Ouvert'}
+              icon={<MapPin className="h-4 w-4" />}
             />
           </div>
         </section>

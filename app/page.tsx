@@ -158,6 +158,7 @@ export default function HomePage() {
   ]);
   const [lodgings, setLodgings] = useState<LodgingId[]>([]);
   const [hasDog, setHasDog] = useState(false);
+  const [sameCountry, setSameCountry] = useState(false);
 
   const canSubmit = useMemo(() => {
     return (
@@ -309,6 +310,10 @@ export default function HomePage() {
     query.set('destinationStyle', destinationStyles.join(','));
     query.set('hasDog', hasDog ? '1' : '0');
 
+    if (sameCountry) {
+      query.set('sameCountry', '1');
+    }
+
     if (startDate) {
       query.set('start', startDate);
     }
@@ -338,6 +343,8 @@ export default function HomePage() {
       hasDog,
       travelWithDog: hasDog,
       pets: hasDog ? ['dog'] : [],
+      sameCountry,
+      staySameCountry: sameCountry,
     };
 
     localStorage.setItem('gt_criteria', JSON.stringify(criteria));
@@ -503,6 +510,49 @@ export default function HomePage() {
             </div>
 
             <div>
+              <h2 className="mb-3 text-sm font-bold">Zone de voyage</h2>
+
+              <button
+                type="button"
+                onClick={() => setSameCountry((current) => !current)}
+                className={`flex w-full items-start gap-4 rounded-2xl border p-4 text-left transition ${
+                  sameCountry
+                    ? 'border-teal-700 bg-teal-50'
+                    : 'border-slate-200 bg-white hover:bg-slate-50'
+                }`}
+              >
+                <div
+                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
+                    sameCountry
+                      ? 'bg-teal-700 text-white'
+                      : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  <MapPin className="h-5 w-5" />
+                </div>
+
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-900">
+                      Je veux rester dans le même pays
+                    </span>
+
+                    {sameCountry && (
+                      <span className="rounded-full bg-teal-700 px-2 py-0.5 text-xs font-semibold text-white">
+                        Activé
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="mt-1 text-sm text-slate-600">
+                    Exemple : départ Lille + mer = Côte d’Opale, Normandie,
+                    Bretagne, Atlantique ou Méditerranée selon le budget.
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            <div>
               <h2 className="mb-3 text-sm font-bold">Animaux</h2>
 
               <button
@@ -660,19 +710,19 @@ export default function HomePage() {
             </div>
 
             <h2 className="mb-4 text-2xl font-extrabold">
-              Mélangez les styles de destinations
+              Des destinations plus cohérentes
             </h2>
 
             <div className="space-y-3 text-slate-700">
               <p>
-                Vous pouvez demander uniquement des valeurs sûres, uniquement des
-                pépites, ou mélanger plusieurs styles.
+                Gototrip tient compte de l’environnement, du budget, de la durée,
+                de la distance depuis le départ et de l’option même pays.
               </p>
 
               <div className="rounded-2xl bg-white p-4 text-sm">
-                Exemple : en choisissant “Classique” + “Étonnante”, Gototrip peut
-                proposer Londres ou Rome, mais aussi Porto, Ljubljana, Tallinn,
-                Bologne ou Kotor selon vos critères.
+                Exemple : départ Lille + mer + petit budget peut proposer la Côte
+                d’Opale, la Normandie ou la Bretagne plutôt qu’une destination
+                trop éloignée ou incohérente.
               </div>
             </div>
           </section>
@@ -682,28 +732,24 @@ export default function HomePage() {
 
             <div className="grid gap-3">
               <FeatureLine
-                title="Destinations via API"
-                text="Recherche dynamique de destinations adaptées."
+                title="Destinations cohérentes"
+                text="Mer, montagne, ville, nature ou campagne sont mieux respectés."
               />
               <FeatureLine
-                title="Sélection multiple"
-                text="Classique, surprenante, décalée, mer, montagne, ville, nature et hébergements peuvent être combinés."
+                title="Budget et distance"
+                text="Petit budget : destinations plus proches. Gros budget : destinations plus ouvertes."
+              />
+              <FeatureLine
+                title="Même pays"
+                text="Possibilité de limiter les propositions au pays de départ."
               />
               <FeatureLine
                 title="Voyage avec chien"
                 text="Gototrip peut favoriser les activités extérieures et les hébergements acceptant les animaux."
               />
               <FeatureLine
-                title="Effet pépite"
-                text="Des idées plus originales pour éviter les listes trop bateau."
-              />
-              <FeatureLine
-                title="Budget contrôlé"
-                text="Alerte si votre voyage dépasse le budget prévu."
-              />
-              <FeatureLine
-                title="Parcours guidé"
-                text="Activités, restaurants, hébergement puis transport."
+                title="Sélection multiple"
+                text="Classique, surprenante, décalée, mer, montagne, ville, nature et hébergements peuvent être combinés."
               />
               <FeatureLine
                 title="Réservation"

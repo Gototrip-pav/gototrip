@@ -228,7 +228,7 @@ function getDestinationStyleText(style: string) {
   return labels.join(' + ');
 }
 
-function isIslandOrSeaDestination(
+function isIslandDestination(
   destinationCity?: string,
   destinationCountry?: string
 ) {
@@ -257,6 +257,7 @@ function isIslandOrSeaDestination(
     'canary',
     'azores',
     'acores',
+    'açores',
     'island',
     'ile',
     'iles',
@@ -430,6 +431,104 @@ function isLongHaulDestination(city: string, country: string) {
   return longHaulKeywords.some((keyword) => text.includes(normalizeText(keyword)));
 }
 
+function hasRealisticAirportAccess(city: string, country: string) {
+  const text = normalizeText(`${city} ${country}`);
+
+  const airportCitiesOrNearby = [
+    'paris',
+    'lille',
+    'lyon',
+    'marseille',
+    'nice',
+    'toulouse',
+    'bordeaux',
+    'nantes',
+    'montpellier',
+    'biarritz',
+    'pau',
+    'perpignan',
+    'brest',
+    'rennes',
+    'strasbourg',
+    'ajaccio',
+    'bastia',
+    'figari',
+    'calvi',
+
+    'bruxelles',
+    'brussels',
+    'charleroi',
+    'ostende',
+    'ostend',
+    'amsterdam',
+    'rotterdam',
+    'eindhoven',
+    'londres',
+    'london',
+    'manchester',
+    'edimbourg',
+    'edinburgh',
+
+    'barcelone',
+    'barcelona',
+    'madrid',
+    'valence',
+    'valencia',
+    'palma',
+    'ibiza',
+    'malaga',
+    'séville',
+    'seville',
+    'bilbao',
+    'san sebastian',
+
+    'lisbonne',
+    'lisbon',
+    'porto',
+    'faro',
+    'funchal',
+    'ponta delgada',
+
+    'rome',
+    'milan',
+    'naples',
+    'cagliari',
+    'palermo',
+    'catane',
+    'catania',
+    'venise',
+    'venice',
+    'bologne',
+    'bologna',
+
+    'split',
+    'dubrovnik',
+    'zadar',
+    'pula',
+    'kotor',
+    'podgorica',
+    'tirana',
+    'sarajevo',
+    'tbilissi',
+    'tbilisi',
+
+    'new york',
+    'tokyo',
+    'quebec',
+    'québec',
+    'montreal',
+    'montréal',
+    'dubai',
+    'dubaï',
+    'singapour',
+    'singapore',
+  ];
+
+  return airportCitiesOrNearby.some((keyword) =>
+    text.includes(normalizeText(keyword))
+  );
+}
+
 function estimatePlaneDuration(distanceKm: number) {
   if (distanceKm <= 300) return '≈ 1h à 2h';
   if (distanceKm <= 900) return '≈ 2h à 3h';
@@ -515,17 +614,26 @@ function buildTransportEstimates({
   destinationCountry: string;
 }) {
   const distance = Math.max(1, Number(distanceKm || 0));
-  const islandOrSea = isIslandOrSeaDestination(destinationCity, destinationCountry);
+  const islandDestination = isIslandDestination(destinationCity, destinationCountry);
   const longHaul = isLongHaulDestination(destinationCity, destinationCountry);
+  const airportAccess = hasRealisticAirportAccess(
+    destinationCity,
+    destinationCountry
+  );
 
   const planeEstimate = estimatePlanePrice(distance, persons);
   const trainEstimate = estimateTrainPrice(distance, persons);
   const busEstimate = estimateBusPrice(distance, persons);
   const carEstimate = estimateCarPrice(distance, persons);
 
-  const trainPossible = !islandOrSea && !longHaul && distance <= 1000;
-  const busPossible = !islandOrSea && !longHaul && distance <= 900;
-  const carPossible = !islandOrSea && !longHaul && distance <= 1200;
+  const planePossible =
+    longHaul ||
+    islandDestination ||
+    (airportAccess && distance >= 650);
+
+  const trainPossible = !islandDestination && !longHaul && distance <= 1000;
+  const busPossible = !islandDestination && !longHaul && distance <= 900;
+  const carPossible = !longHaul && distance <= 1200;
 
   const estimates: TransportEstimate[] = [
     {
@@ -534,8 +642,14 @@ function buildTransportEstimates({
       total: planeEstimate.total,
       pricePerPerson: planeEstimate.pricePerPerson,
       duration: estimatePlaneDuration(distance),
-      source: 'Estimation distance',
-      possible: true,
+      source: airportAccess
+        ? 'Estimation distance + accès aéroport'
+        : islandDestination
+          ? 'Destination insulaire'
+          : longHaul
+            ? 'Long-courrier'
+            : 'Aéroport proche non détecté',
+      possible: planePossible,
     },
     {
       id: 'train',
@@ -569,7 +683,13 @@ function buildTransportEstimates({
   const possibleEstimates = estimates.filter((estimate) => estimate.possible);
 
   if (possibleEstimates.length === 0) {
-    return estimates[0];
+    return estimates
+      .map((estimate) => ({
+        ...estimate,
+        possible: true,
+        source: `${estimate.source} • alternative à vérifier`,
+      }))
+      .sort((a, b) => a.total - b.total)[0];
   }
 
   return possibleEstimates.sort((a, b) => a.total - b.total)[0];
@@ -1041,7 +1161,7 @@ export default function DestinationsPage() {
 
               if (bestTransport.id === 'plane') {
                 reasons.push('Avion estimé comme transport principal le moins cher possible.');
-                warnings.push('Prix avion estimé à confirmer avec une API partenaire.');
+                warnings.push('Vérifier l’aéroport de départ/arrivée et les transferts.');
               }
 
               if (localMobility.mode === 'rental-car') {

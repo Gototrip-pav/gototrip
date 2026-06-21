@@ -5,6 +5,14 @@ export const revalidate = 0;
 
 type AffiliateProvider = 'booking' | 'getyourguide';
 
+type AccommodationType =
+  | 'hotel'
+  | 'camping'
+  | 'apartment'
+  | 'house'
+  | 'hostel'
+  | '';
+
 type AffiliateLinkPayload = {
   provider?: string;
   city?: string;
@@ -15,10 +23,20 @@ type AffiliateLinkPayload = {
   persons?: number;
   pets?: boolean;
   hasDog?: boolean;
+  lodging?: string;
+  accommodationType?: string;
+  type?: string;
 };
 
 function cleanValue(value: string | null | undefined) {
   return String(value || '').trim();
+}
+
+function normalizeText(value: string | null | undefined) {
+  return cleanValue(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '');
 }
 
 function isTruthy(value: unknown) {
@@ -31,6 +49,10 @@ function getBookingBaseAffiliateUrl() {
   return process.env.BOOKING_CJ_AFFILIATE_URL || '';
 }
 
+function getBookingAffiliateId() {
+  return process.env.BOOKING_AFFILIATE_ID || '';
+}
+
 function getGetYourGuideAffiliateUrl() {
   return process.env.GETYOURGUIDE_AFFILIATE_URL || '';
 }
@@ -39,18 +61,96 @@ function getGetYourGuidePartnerId() {
   return process.env.GETYOURGUIDE_PARTNER_ID || '';
 }
 
-function buildBookingSearchUrl({
-  city,
-  country,
-  checkin,
-  checkout,
-  persons,
-  pets,
-  hasDog,
-}: AffiliateLinkPayload) {
-  const destination = [cleanValue(city), cleanValue(country)]
-    .filter(Boolean)
-    .join(', ');
+function normalizeAccommodationType(value?: string): AccommodationType {
+  const text = normalizeText(value);
+
+  if (!text) return '';
+
+  if (
+    text.includes('camping') ||
+    text.includes('campground') ||
+    text.includes('tent') ||
+    text.includes('tente')
+  ) {
+    return 'camping';
+  }
+
+  if (
+    text.includes('appartement') ||
+    text.includes('apartment') ||
+    text.includes('aparthotel') ||
+    text.includes('studio')
+  ) {
+    return 'apartment';
+  }
+
+  if (
+    text.includes('maison') ||
+    text.includes('house') ||
+    text.includes('villa') ||
+    text.includes('gite') ||
+    text.includes('gîte') ||
+    text.includes('holiday home')
+  ) {
+    return 'house';
+  }
+
+  if (
+    text.includes('auberge') ||
+    text.includes('hostel') ||
+    text.includes('youth hostel')
+  ) {
+    return 'hostel';
+  }
+
+  if (
+    text.includes('hotel') ||
+    text.includes('hôtel') ||
+    text.includes('resort')
+  ) {
+    return 'hotel';
+  }
+
+  return '';
+}
+
+function getAccommodationSearchLabel(type: AccommodationType) {
+  if (type === 'camping') return 'camping';
+  if (type === 'apartment') return 'appartement';
+  if (type === 'house') return 'maison de vacances';
+  if (type === 'hostel') return 'auberge de jeunesse';
+  if (type === 'hotel') return 'hôtel';
+
+  return '';
+}
+
+function getAccommodationFromPayload(payload: AffiliateLinkPayload) {
+  return normalizeAccommodationType(
+    payload.accommodationType || payload.lodging || payload.type || ''
+  );
+}
+
+function buildBookingSearchUrl(payload: AffiliateLinkPayload) {
+  const {
+    city,
+    country,
+    checkin,
+    checkout,
+    persons,
+    pets,
+    hasDog,
+  } = payload;
+
+  const accommodationType = getAccommodationFromPayload(payload);
+  const accommodationLabel = getAccommodationSearchLabel(accommodationType);
+
+  const destinationParts = [
+    accommodationLabel,
+    cleanValue(city),
+    cleanValue(country),
+  ].filter(Boolean);
+
+  const destination = destinationParts.join(' ');
 
   const bookingUrl = new URL('https://www.booking.com/searchresults.fr.html');
 
@@ -76,6 +176,12 @@ function buildBookingSearchUrl({
     bookingUrl.searchParams.set('pets', '1');
   }
 
+  const bookingAffiliateId = cleanValue(getBookingAffiliateId());
+
+  if (bookingAffiliateId) {
+    bookingUrl.searchParams.set('aid', bookingAffiliateId);
+  }
+
   bookingUrl.searchParams.set('selected_currency', 'EUR');
   bookingUrl.searchParams.set('lang', 'fr');
 
@@ -98,15 +204,22 @@ function attachDestinationToCjLink(cjAffiliateUrl: string, destinationUrl: strin
 function buildBookingAffiliateUrl(payload: AffiliateLinkPayload) {
   const bookingDestinationUrl = buildBookingSearchUrl(payload);
   const cjAffiliateUrl = getBookingBaseAffiliateUrl();
+  const bookingAffiliateId = getBookingAffiliateId();
+  const accommodationType = getAccommodationFromPayload(payload);
 
   return {
     provider: 'booking' as const,
-    affiliateConfigured: Boolean(cjAffiliateUrl),
+    affiliateConfigured: Boolean(cjAffiliateUrl || bookingAffiliateId),
+    cjConfigured: Boolean(cjAffiliateUrl),
+    bookingAffiliateIdConfigured: Boolean(bookingAffiliateId),
+    accommodationType,
     destinationUrl: bookingDestinationUrl,
     url: attachDestinationToCjLink(cjAffiliateUrl, bookingDestinationUrl),
     note: cjAffiliateUrl
-      ? 'Lien Booking CJ utilisé avec destination dynamique.'
-      : 'Aucun lien CJ Booking configuré. Gototrip ouvre la recherche Booking standard.',
+      ? 'Lien Booking CJ utilisé avec destination dynamique, aid Booking et type hébergement en recherche.'
+      : bookingAffiliateId
+        ? 'Lien Booking direct utilisé avec aid Booking et type hébergement en recherche.'
+        : 'Aucun lien CJ Booking ni BOOKING_AFFILIATE_ID configuré. Gototrip ouvre la recherche Booking standard.',
   };
 }
 
@@ -227,6 +340,14 @@ export async function GET(request: Request) {
     checkin: cleanValue(searchParams.get('checkin')),
     checkout: cleanValue(searchParams.get('checkout')),
     persons: Number(searchParams.get('persons') || 1),
+    lodging:
+      cleanValue(searchParams.get('lodging')) ||
+      cleanValue(searchParams.get('stay')) ||
+      cleanValue(searchParams.get('accommodation')),
+    accommodationType:
+      cleanValue(searchParams.get('accommodationType')) ||
+      cleanValue(searchParams.get('propertyType')),
+    type: cleanValue(searchParams.get('type')),
     pets:
       isTruthy(searchParams.get('pets')) ||
       isTruthy(searchParams.get('petFriendly')),
